@@ -30,6 +30,22 @@ CASSANDRA TYPES
 <collection-type> ::= list '<' <native-type> '>'
                     | set  '<' <native-type> '>'
                     | map  '<' <native-type> ',' <native-type> '>'
+                    
+
+MAPPED-TO PYTHON TYPES
+
+str
+int
+long
+buffer / bytearray
+bool
+decimal
+float
+list / tuple / generator
+dict / OrderedDict
+set / frozenset
+date / datetime
+uuid
 """
 
 def generateData(datatype, **kwargs):
@@ -52,10 +68,10 @@ def generateData(datatype, **kwargs):
               'varchar' : 'varchar',
               'varint' : fake.random_int, #parameters: max, min
               }
-    if datatype in switch:
+    try: 
         data = switch[datatype](**kwargs)
         print type(data),data
-    else:
+    except KeyError:
         print 'generation of Datatype "{}" not implemented.'.format(datatype) 
     
 def generateDataAscii(size=20):
@@ -68,3 +84,4 @@ def generateDataTime(start_date='-5y', end_date='now', **kwargs):
 
 generateData('uuid')
 generateData('timestamp',start_date=datetime.datetime(2000,01,01,00),end_date=datetime.datetime(2000,01,01,01))
+generateData('uid')

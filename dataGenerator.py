@@ -82,6 +82,15 @@ def generateDataTime(start_date='-5y', end_date='now', **kwargs):
     time = fake.date_time_between(start_date,end_date)
     return time
 
-generateData('uuid')
-generateData('timestamp',start_date=datetime.datetime(2000,01,01,00),end_date=datetime.datetime(2000,01,01,01))
-generateData('uid')
+#generateData('uuid')
+#generateData('timestamp',start_date=datetime.datetime(2000,01,01,00),end_date=datetime.datetime(2000,01,01,01))
+#generateData('uid')
+
+import random
+wh = random.WichmannHill()
+wh.seed(1234)
+for i in range(0,10):
+    print i, wh.random()
+wh.seed(1234)
+wh.jumpahead(1)
+print wh.random()

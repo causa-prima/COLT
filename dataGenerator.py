@@ -1,5 +1,10 @@
 import datetime
 from uuid import uuid1 as uuid
+from decimal import Decimal
+from random import WichmannHill
+from string import printable
+from sys import float_info
+from sys import exc_info
 
 """
 CASSANDRA TYPES
@@ -45,21 +50,19 @@ date / datetime
 uuid
 buffer / bytearray
 """
-from random import WichmannHill
-from string import printable
-from sys import float_info
+
 
 class Rndm:
-    native-types_switch = dict(
+    native_types_switch = dict(
         ascii=pystring,
         bigint=pyint,
-        blob=pyblob,
+        blob=pybytearray,
         boolean=pyboolean,
         counter=pyint,
         decimal=pydecimal,
         double=pyfloat,
         float=pyfloat,
-        inet=ipv6,
+        inet=ip,
         int=pyint,
         text=pystring,
         timestamp=pydate,
@@ -69,7 +72,7 @@ class Rndm:
         varint=pyint
     )
 
-    collections-type_switch = dict(
+    collections_type_switch = dict(
         list=pylist,
         map=pydict,
         set=pyset
@@ -77,18 +80,43 @@ class Rndm:
 
 
     def __init__(self):
-        self.generator = WichmannHill()
+        self.PRNG = WichmannHill()
 
     def seed(self, seed):
         """Seeds the random generator with the provided seed.
         
         :param hashable seed: some hashable seed 
         """
-        self.generator.seed(seed)
+        self.PRNG.seed(seed)
 
-    def ipv6(self, length=50):
-        # TODO: implement
-        pass
+    def generator(self, n, type, **args):
+        """Generator for all native types.
+
+        :param n: number of items to generate
+        :param type: type of items to generate, must be native types
+        :param **args: keyword args for the native type generator used
+        :return: native type generator
+        :rtype: generator
+        """
+        num = 0
+        while num < n:
+            try:
+                yield self.native_types_switch[type](**args)
+                num += 1
+            except:
+                print exc_info()[0]
+
+    def ip(self, ip_type='ipv4'):
+        """Generates a random IP address.
+
+        :param ip_type: type of IP address, values except 'ipv4' generate IPv6 addresses. default = 'ipv4'
+        :return: random IP address
+        :rtype: string
+        """
+        if ip_type == 'ipv4':
+            return '.'.join([str(self.PRNG.choice(xrange(255))) for _ in xrange(4)])
+        else:
+            return ':'.join([hex(self.PRNG.choice(xrange(65535)))[2:] for _ in xrange(8)])
 
     def pydate(self, length=50):
         # TODO: implement
@@ -98,9 +126,14 @@ class Rndm:
         # TODO: implement
         pass
 
-    def pybuffer(self, length=50):
-        # TODO: implement
-        pass
+    def pybytearray(self, size=50):
+        """Generates a random bytearray.
+
+        :param size: number of bytes in resulting bytearray
+        :return: random bytearray
+        :rtype: bytearray
+        """
+        return bytearray([x for x in self.generator(size, 'int', high=255)])
 
     def pyboolean(self, chance_of_getting_true=50):
         """Generates a random boolean.
@@ -109,7 +142,7 @@ class Rndm:
         :return: random boolean
         :rtype: boolean
         """
-        return self.generator.randint(1, 100) <= chance_of_getting_true
+        return self.PRNG.randint(1, 100) <= chance_of_getting_true
 
     def pystring(self, length=10):
         """ Generates a random string.
@@ -119,7 +152,7 @@ class Rndm:
         :rtype: string
         """
         chars = printable
-        return ''.join(self.generator.choice(chars) for x in range(length))
+        return ''.join(self.PRNG.choice(chars) for x in range(length))
 
     def pyint(self, low=0, high=65535):
         """Generates a random integer.
@@ -129,7 +162,7 @@ class Rndm:
         :return: random integer
         :rtype: int
         """
-        return self.generator.randint(low, high)
+        return self.PRNG.randint(low, high)
 
     def pylong(self, bits=64):
         """ Generates a random long integer.
@@ -138,7 +171,7 @@ class Rndm:
         :return: random long integer
         :rtype: long
         """
-        return self.generator.getrandbits(bits)
+        return self.PRNG.getrandbits(bits)
 
     def pyfloat(self, left_digits=None, right_digits=None, positive=None):
         """ Generates a random float. Unset parameters are randomly generated.
@@ -150,13 +183,13 @@ class Rndm:
         :rtype: float
         """
 
-        left_digits = left_digits or self.generator.randint(1, float_info.dig)
-        right_digits = right_digits or self.generator.randint(0, float_info.dig - left_digits)
-        sign = 1 if positive or self.generator.randint(0, 1) else -1
+        left_digits = left_digits or self.PRNG.randint(1, float_info.dig)
+        right_digits = right_digits or self.PRNG.randint(0, float_info.dig - left_digits)
+        sign = 1 if positive or self.PRNG.randint(0, 1) else -1
 
         return float("{0}.{1}".format(
-            sign * self.generator.randint(0, pow(10, left_digits) - 1),
-            self.generator.randint(0, pow(10, right_digits) - 1)
+            sign * self.PRNG.randint(0, pow(10, left_digits) - 1),
+            self.PRNG.randint(0, pow(10, right_digits) - 1)
         ))
 
     def pydecimal(self, left_digits=None, right_digits=None, positive=None):
@@ -170,14 +203,32 @@ class Rndm:
         """
         return Decimal(str(self.pyfloat(left_digits, right_digits, positive)))
 
-    def pylist(self, elem_count=10, elem_type='int', elem_args=None):
-        pass
+    def pylist(self, elem_count=10, elem_type='int', **elem_args):
+        result = []
+        for _ in xrange(elem_count):
+            try:
+                result.append(self.native_types_switch[elem_type](**elem_args))
+            except KeyError:
+                print 'generation of Datatype "{}" not supported/implemented.'.format(elem_type)
+        return result
 
-    def pydict(self, elem_count=10, key_type='int', elem_type='int', elem_args=None):
-        pass
+    def pydict(self, elem_count=10, key_type='int', elem_type='int', **elem_args):
+        result = dict()
+        while len(result) < elem_count:
+            try:
+                result[self.native_types_switch[key_type]()] = (self.native_types_switch[elem_type](**elem_args))
+            except KeyError:
+                print 'generation of Datatype "{}" not supported/implemented.'.format(elem_type)
+        return result
 
-    def pyset(self, elem_count=10, elem_type='int', elem_args=None):
-        pass
+    def pyset(self, elem_count=10, elem_type='int', **elem_args):
+        result = set()
+        while len(result) < elem_count:
+            try:
+                result.add(self.native_types_switch[elem_type](**elem_args))
+            except KeyError:
+                print 'generation of Datatype "{}" not supported/implemented.'.format(elem_type)
+        return result
 
 
 import time
@@ -199,14 +250,15 @@ for i in xrange(10000000):
     wh.randint(0,65535)
 print time.time() - start_time"""
 
+
 def generateData(datatype, **kwargs):
     print datatype, ':',
     switch = {
         'ascii': generateDataAscii,
         'bigint': fake.random_int,  # parameters: max, min
         'blob': 'blob',
-        'boolean': fake.boolean,  #parameters: chance_of_getting_true
-        'counter': fake.random_int,  #parameters: max, min
+        'boolean': fake.boolean,  # parameters: chance_of_getting_true
+        'counter': fake.random_int,  # parameters: max, min
         'decimal': 'decimal',
         'double': 'double',
         'float': 'float',
@@ -229,11 +281,12 @@ def generateData(datatype, **kwargs):
 def generateDataAscii(size=20):
     return size
 
+
 def generateDataTime(start_date='-5y', end_date='now', **kwargs):
     # TODO: timestamps without hh:mm:ss - usefull?
     time = fake.date_time_between(start_date, end_date)
     return time
 
     # generateData('uuid')
-    #generateData('timestamp',start_date=datetime.datetime(2000,01,01,00),end_date=datetime.datetime(2000,01,01,01))
+    # generateData('timestamp',start_date=datetime.datetime(2000,01,01,00),end_date=datetime.datetime(2000,01,01,01))
     #generateData('uid')

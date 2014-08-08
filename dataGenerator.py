@@ -1,86 +1,39 @@
-import datetime
-from uuid import uuid1 as uuid
+from datetime import datetime
+from time import mktime
+from uuid import UUID
 from decimal import Decimal
 from random import WichmannHill
 from string import printable
 from sys import float_info
 from sys import exc_info
 
-"""
-CASSANDRA TYPES
-
-<type> ::= <native-type>
-         | <collection-type>
-         | <string>       // Used for custom types. The fully-qualified name of a JAVA class
-
-<native-type> ::= ascii
-                | bigint
-                | blob
-                | boolean
-                | counter
-                | decimal
-                | double
-                | float
-                | inet
-                | int
-                | text
-                | timestamp
-                | timeuuid
-                | uuid
-                | varchar
-                | varint
-
-<collection-type> ::= list '<' <native-type> '>'
-                    | set  '<' <native-type> '>'
-                    | map  '<' <native-type> ',' <native-type> '>'
-                    
-
-MAPPED-TO PYTHON TYPES
-
-x str 
-x int
-x long
-x bool
-x decimal
-x float
-list / tuple / generator
-dict / OrderedDict
-set / frozenset
-date / datetime
-uuid
-buffer / bytearray
-"""
-
 
 class Rndm:
-    native_types_switch = dict(
-        ascii=pystring,
-        bigint=pyint,
-        blob=pybytearray,
-        boolean=pyboolean,
-        counter=pyint,
-        decimal=pydecimal,
-        double=pyfloat,
-        float=pyfloat,
-        inet=ip,
-        int=pyint,
-        text=pystring,
-        timestamp=pydate,
-        timeuuid=pyuuid,
-        uuid=pyuuid,
-        varchar=pystring,
-        varint=pyint
-    )
-
-    collections_type_switch = dict(
-        list=pylist,
-        map=pydict,
-        set=pyset
-    )
-
-
     def __init__(self):
         self.PRNG = WichmannHill()
+        self.native_types_switch = dict(
+            ascii=self.pystring,
+            bigint=self.pylong,
+            blob=self.pybytearray,
+            boolean=self.pyboolean,
+            counter=self.pyint,
+            decimal=self.pydecimal,
+            double=self.pyfloat,
+            float=self.pyfloat,
+            inet=self.ip,
+            int=self.pyint,
+            text=self.pystring,
+            timestamp=self.pydate,
+            timeuuid=self.pyuuid,
+            uuid=self.pyuuid,
+            varchar=self.pystring,
+            varint=self.pylong
+        )
+        self.collections_type_switch = dict(
+            list=self.pylist,
+            map=self.pydict,
+            set=self.pyset
+        )
 
     def seed(self, seed):
         """Seeds the random generator with the provided seed.
@@ -106,6 +59,17 @@ class Rndm:
             except:
                 print exc_info()[0]
 
+    def getrandbits(self, bits):
+        """Generates a unsigned long with maximum value of 2^bits-1.
+        This function is only needed because the getrandbits method of all
+        python random number generators rely on os.urandom, which is not seedable.
+
+        :param int bits: number of bits
+        :return: random number
+        :rtype: long
+        """
+        return self.PRNG.randint(0, pow(2, bits) - 1)
+
     def ip(self, ip_type='ipv4'):
         """Generates a random IP address.
 
@@ -118,22 +82,51 @@ class Rndm:
         else:
             return ':'.join([hex(self.PRNG.choice(xrange(65535)))[2:] for _ in xrange(8)])
 
-    def pydate(self, length=50):
-        # TODO: implement
-        pass
+    def pydate(self, start_date=None, end_date=None, start_timestamp=1388530800, end_timestamp=1420066799):
+        """Generates a random timestamp between two dates given either as datetime or timestamp.
+        If start_date __and__ end_date are defined, timestamps will be ignored.
 
-    def pyuuid(self, length=50):
-        # TODO: implement
-        pass
+        :param optional datetime start_date: start date of time period. default = None
+        :param optional datetime end_date: end date of time period. default = None
+        :param optional int start_timestamp: start date of time period. default = 1388530800 (2014-01-01 00:00:00)
+        :param optional int end_timestamp: end date of time period. default = 1420066799 (2014-12-31 23:59:59)
+        :return: random date between start and end
+        :rtype: datetime
+        """
+        if (start_date is not None) & (end_date is not None):
+            start_timestamp = int(mktime(start_date.timetuple()))
+            end_timestamp = int(mktime(end_date.timetuple()))
+        return datetime.fromtimestamp(self.PRNG.randint(start_timestamp, end_timestamp))
+
+    def pyuuid(self):
+        """Generates a random UUID.
+
+        :return: random UUID
+        :rtype: uuid
+        """
+        nanoseconds = int(mktime(self.pydate().timetuple()) * 1e9)
+        # 0x01b21dd213814000 is the number of 100-ns intervals between the
+        # UUID epoch 1582-10-15 00:00:00 and the Unix epoch 1970-01-01 00:00:00.
+        timestamp = int(nanoseconds // 100) + 0x01b21dd213814000L
+        clock_seq = self.PRNG.randrange(1 << 14L)  # instead of stable storage
+        time_low = timestamp & 0xffffffffL
+        time_mid = (timestamp >> 32L) & 0xffffL
+        time_hi_version = (timestamp >> 48L) & 0x0fffL
+        clock_seq_low = clock_seq & 0xffL
+        clock_seq_hi_variant = (clock_seq >> 8L) & 0x3fL
+        node = self.PRNG.randrange(1 << 47L)
+
+        return UUID(fields=(time_low, time_mid, time_hi_version, clock_seq_hi_variant, clock_seq_low, node), version=1)
+
 
     def pybytearray(self, size=50):
         """Generates a random bytearray.
 
-        :param size: number of bytes in resulting bytearray
+        :param optional int size: number of bytes in resulting bytearray
         :return: random bytearray
         :rtype: bytearray
         """
-        return bytearray([x for x in self.generator(size, 'int', high=255)])
+        return bytearray([x for x in self.generator(size, 'int', low=0, high=255)])
 
     def pyboolean(self, chance_of_getting_true=50):
         """Generates a random boolean.
@@ -154,24 +147,26 @@ class Rndm:
         chars = printable
         return ''.join(self.PRNG.choice(chars) for x in range(length))
 
-    def pyint(self, low=0, high=65535):
+    def pyint(self, low=-2147483648, high=2147483647):
         """Generates a random integer.
         
-        :param optional low: lower bound for return value, can be any integer. default = 0
-        :param optional high: upper bound for return value, can be any integer. default = 65535
+        :param optional low: lower bound for return value, can be any integer. default = -2147483648
+        :param optional high: upper bound for return value, can be any integer. default = 2147483647
         :return: random integer
-        :rtype: int
+        :rtype: int or long, depending on generated number & hardware architecture
         """
         return self.PRNG.randint(low, high)
 
-    def pylong(self, bits=64):
+    def pylong(self, low=-1 * ((1 << 52) - 2), high=1 << 53 - 1):
         """ Generates a random long integer.
         
-        :param optional int bits: maximum number of bits of generated value. default = 64
+        :param optional long low: lower bound for return value, can be any integer. default = -4503599627370494
+        :param optional long high: upper bound for return value, can be any integer. default = 9007199254740991
         :return: random long integer
         :rtype: long
         """
-        return self.PRNG.getrandbits(bits)
+        # TODO: why these values for high and low?
+        return self.PRNG.randint(low, high)
 
     def pyfloat(self, left_digits=None, right_digits=None, positive=None):
         """ Generates a random float. Unset parameters are randomly generated.
@@ -231,62 +226,13 @@ class Rndm:
         return result
 
 
-import time
-import uuid
+rndtest = Rndm()
+rndtest.seed(0)
 
-uid = uuid.uuid1()
-print uid.fields
-"""t = Rndm()
-t.seed(1234)
-start_time = time.time()
-for i in xrange(10000000):
-    t.pyint()
-print time.time() - start_time
-
-wh = WichmannHill()
-wh.seed(1234)
-start_time = time.time()
-for i in xrange(10000000):
-    wh.randint(0,65535)
-print time.time() - start_time"""
-
-
-def generateData(datatype, **kwargs):
-    print datatype, ':',
-    switch = {
-        'ascii': generateDataAscii,
-        'bigint': fake.random_int,  # parameters: max, min
-        'blob': 'blob',
-        'boolean': fake.boolean,  # parameters: chance_of_getting_true
-        'counter': fake.random_int,  # parameters: max, min
-        'decimal': 'decimal',
-        'double': 'double',
-        'float': 'float',
-        'inet': fake.ipv6,
-        'int': fake.random_int,  #parameters: max, min
-        'text': 'text',
-        'timestamp': generateDataTime,  #parameters: start_date, end_date
-        'timeuuid': uuid,
-        'uuid': uuid,
-        'varchar': 'varchar',
-        'varint': fake.random_int,  #parameters: max, min
-    }
-    try:
-        data = switch[datatype](**kwargs)
-        print type(data), data
-    except KeyError:
-        print 'generation of Datatype "{}" not implemented.'.format(datatype)
-
-
-def generateDataAscii(size=20):
-    return size
-
-
-def generateDataTime(start_date='-5y', end_date='now', **kwargs):
-    # TODO: timestamps without hh:mm:ss - usefull?
-    time = fake.date_time_between(start_date, end_date)
-    return time
-
-    # generateData('uuid')
-    # generateData('timestamp',start_date=datetime.datetime(2000,01,01,00),end_date=datetime.datetime(2000,01,01,01))
-    #generateData('uid')
+for key in rndtest.native_types_switch.keys():
+    val = rndtest.native_types_switch[key]()
+    print key
+    print val
+    if key in ('uuid', 'timeuuid'):
+        print datetime.fromtimestamp((val.time - 0x01b21dd213814000L) * 100 / 1e9)
+    print

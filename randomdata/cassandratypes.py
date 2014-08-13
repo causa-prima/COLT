@@ -1,8 +1,10 @@
-import PyRandom
+from pythontypes import PythonTypes
 
-class CassandraRandom(PyRandom):
+
+class CassandraTypes(PythonTypes):
     def __init__(self, seed=None):
-        PyRandom.__init__(self, seed)
+        PythonTypes.__init__(self, seed)
+        # add special cassandra types to the switch for easy mapping from metadata
         new_implemented_types_switch = dict(
             ascii=self.pystring,
             bigint=self.pylong,

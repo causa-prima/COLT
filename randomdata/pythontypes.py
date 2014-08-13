@@ -7,7 +7,7 @@ from string import printable
 from sys import float_info
 
 
-class PyRandom(WichmannHill):
+class PythonTypes(WichmannHill):
     """
     Subclass of random.WichmannHill, implementing methods to generate some basic python types. Methods of this class
     have 'sane' default values to support easy data generation.
@@ -57,7 +57,7 @@ class PyRandom(WichmannHill):
 
         :param int bits: number of bits
         :return: random number
-        :rtype: long
+        :rtype: long or int, depending on size
         """
         return self.randint(0, pow(2, bits) - 1)
 

@@ -1,13 +1,21 @@
 from cassandra.cluster import Cluster
 
-def getKeyspaces(cluster):
-    return cluster.metadata.keyspaces
+class CassandraMetadata(object):
 
-def getSchemas(keyspaceMetadata):
-    schema = {}
-    for table in keyspaceMetadata.tables.values():
-        schema[table.name] = table.columns
-    return schema
+    def __init__(self):
+        self.cluster = Cluster()
+        # TODO: is the session object needed?
+        self.session = self.cluster.connect('test')
+        self.keyspaces = self.cluster.metadata.keyspaces
+
+    def __del__(self):
+        self.cluster.shutdown()
+
+    def getKeyspaceSchema(self, keyspaceName):
+        schema = {}
+        for table in self.keyspaces[keyspaceName].tables.values():
+            schema[table.name] = table.columns
+        return schema
 
 """
 cluster = Cluster(metrics_enabled=True)

@@ -1,0 +1,4 @@
+needed python packages (installed vie pip):
+- futures
+- blist (maybe no really needed, but was installed)
+- cassandra-driver

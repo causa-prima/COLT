@@ -52,8 +52,8 @@ class PythonTypes(WichmannHill):
 
     def getrandbits(self, bits):
         """Generates a unsigned long with maximum value of 2^bits-1.
-        This function is only needed because the getrandbits method of all
-        python random number generators rely on os.urandom, which is not seedable.
+        This function re-implements the getrandbits-method because the methods of all
+        python random number generators seems to rely on some unseedable source.
 
         :param int bits: number of bits
         :return: random number

@@ -1,8 +1,11 @@
-from time import time
+from datetime import datetime
 from cassandra.cluster import Cluster
-from interface import Interface
+from connectioninterface import ConnectionInterface
+from logger import Logger
 
-class CassandraConnection(Interface):
+logger = Logger()
+
+class CassandraConnection(ConnectionInterface):
 
     def connect(self, **kwargs):
         """ Create connection to cassandra cluster.
@@ -17,16 +20,24 @@ class CassandraConnection(Interface):
         """
         self.cluster.shutdown()
 
-    def execute(self, statement, parameters):
+    def execute(self, statement, parameters, workload_id, wl_query_id):
         """ Execute prepared statement with parameters.
          The query is executed non-blocking and asynchronously,
          automatically logging the result.
 
         :param cassandra.query.Statement statement: the prepared statement
         :param parameters: parameters for the prepared statement
+        :param workload_id: workload identifier for logging
+        :param wl_query_id: workload query identifier for logging
         """
 
-        future = self.session.execute_async(statement,parameters)
+        future = self.session.execute_async(statement, parameters)
         future.add_callbacks(
-            callback=log_results, callback_kwargs={'start_time':time()},
-            errback=log_err, errback_kwargs={'statement':statement})
+            callback=logger.log_results, callback_kwargs={
+                                                    'time_start': datetime.now(),
+                                                    'workload': workload_id,
+                                                    'wl_query_id': wl_query_id},
+            errback=logger.log_err, errback_kwargs={'statement': statement})
+
+test = CassandraConnection(contact_points=['127.0.0.1'])
+print test.cluster.metadata.keyspaces

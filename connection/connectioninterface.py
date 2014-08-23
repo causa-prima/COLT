@@ -1,4 +1,4 @@
-class Interface(object):
+class ConnectionInterface(object):
     """
     Interface for DB-connections.
 
@@ -9,13 +9,13 @@ class Interface(object):
     have to be implemented by subclasses.
     """
 
-    def __init__(self):
-        self.connect()
+    def __init__(self, **kwargs):
+        self.connect(**kwargs)
 
     def __del__(self):
         self.shutdown()
 
-    def connect(self):
+    def connect(self, **kwargs):
         raise NotImplementedError
 
     def shutdown(self):

@@ -31,13 +31,17 @@ class CassandraConnection(ConnectionInterface):
         :param wl_query_id: workload query identifier for logging
         """
 
+        # execute query asynchronously, returning a ResponseFuture-object
+        # to which callbacks can be added
         future = self.session.execute_async(statement, parameters)
         future.add_callbacks(
             callback=logger.log_results, callback_kwargs={
                                                     'time_start': datetime.now(),
                                                     'workload': workload_id,
                                                     'wl_query_id': wl_query_id},
-            errback=logger.log_err, errback_kwargs={'statement': statement})
-
-test = CassandraConnection(contact_points=['127.0.0.1'])
-print test.cluster.metadata.keyspaces
+            errback=logger.log_err, errback_kwargs={
+                                                'statement': statement,
+                                                'parameters': parameters,
+                                                'workload_id': workload_id,
+                                                'wl_query_id': wl_query_id}
+        )

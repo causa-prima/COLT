@@ -27,9 +27,6 @@ class ConnectionInterface(object):
 
     def execute(self, query):
         """ Executes a given query non-blocking and asynchronously,
-        returning a analyze object for response receiving.
-
-        :return: analyze object
-        :rtype: analyze
+        using logger.log_result and logger.log_error for responses.
         """
         raise NotImplementedError

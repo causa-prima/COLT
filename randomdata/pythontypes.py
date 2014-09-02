@@ -14,6 +14,7 @@ class PythonTypes(WichmannHill):
     """
 
     def __init__(self, seed=None):
+        WichmannHill.__init__(self, seed)
         self.implemented_types_switch = dict(
             date=self.pydate,
             uuid=self.pyuuid,

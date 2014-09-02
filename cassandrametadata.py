@@ -2,15 +2,16 @@ from connection.cassandraconnection import CassandraConnection
 
 
 class CassandraMetadata(object):
-    def __init__(self):
-        self.connection = CassandraConnection()
+    def __init__(self, **connection_kwargs):
+        self.connection = CassandraConnection(**connection_kwargs)
         self.schema = {}
-        self.getSchema()
+        self.get_schema()
 
-    def getSchema(self):
+    def get_schema(self):
         """ Adds all needed schema data for the generation of random data to self.schema.
         """
         for ks_name, ks_metadata in self.connection.cluster.metadata.keyspaces.items():
+            # exclude cassandra system keyspaces
             if ks_name in ('system_traces', 'system'):
                 continue
             self.schema[ks_name] = {}
@@ -37,4 +38,4 @@ class CassandraMetadata(object):
 
         return '\n'.join(res)
 
-print CassandraMetadata()
+#print CassandraMetadata()

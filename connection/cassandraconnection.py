@@ -33,11 +33,12 @@ class CassandraConnection(ConnectionInterface):
 
         # execute query asynchronously, returning a ResponseFuture-object
         # to which callbacks can be added
+        # TODO: set trace to True?
         future = self.session.execute_async(statement, parameters)
         future.add_callbacks(
             callback=logger.log_results, callback_kwargs={
                                                     'time_start': datetime.now(),
-                                                    'workload': workload_id,
+                                                    'workload_id': workload_id,
                                                     'wl_query_id': wl_query_id},
             errback=logger.log_err, errback_kwargs={
                                                 'statement': statement,

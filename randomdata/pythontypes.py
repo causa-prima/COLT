@@ -60,7 +60,7 @@ class PythonTypes(WichmannHill):
         :return: random number
         :rtype: long or int, depending on size
         """
-        return self.randint(0, pow(2, bits) - 1)
+        return self.randrange(0, pow(2, bits))
 
     def pydate(self, start_date=None, end_date=None, start_timestamp=1388530800, end_timestamp=1420066799):
         """Generates a random timestamp between two dates given either as datetime or timestamp.
@@ -76,7 +76,7 @@ class PythonTypes(WichmannHill):
         if (start_date is not None) & (end_date is not None):
             start_timestamp = int(mktime(start_date.timetuple()))
             end_timestamp = int(mktime(end_date.timetuple()))
-        return datetime.fromtimestamp(self.randint(start_timestamp, end_timestamp))
+        return datetime.fromtimestamp(self.randrange(start_timestamp, end_timestamp+1))
 
     def pyuuid(self):
         """Generates a random UUID.
@@ -117,7 +117,7 @@ class PythonTypes(WichmannHill):
         :return: random boolean
         :rtype: boolean
         """
-        return self.randint(1, 100) <= chance_of_getting_true
+        return self.randrange(1, 101) <= chance_of_getting_true
 
     def pystring(self, length=10):
         """ Generates a random string.
@@ -126,8 +126,9 @@ class PythonTypes(WichmannHill):
         :return: random string
         :rtype: string
         """
-        chars = printable
-        return ''.join(self.choice(chars) for x in range(length))
+        choice = [self.choice(printable) for _ in range(length)]
+        res = ''.join(choice)
+        return res
 
     def pyint(self, low=-2147483648, high=2147483647):
         """Generates a random integer.
@@ -137,7 +138,7 @@ class PythonTypes(WichmannHill):
         :return: random integer
         :rtype: int or long, depending on generated number & hardware architecture
         """
-        return self.randint(low, high)
+        return self.randrange(low, high+1)
 
     def pylong(self, low=-1 * ((1 << 52) - 2), high=1 << 53 - 1):
         """ Generates a random long integer.
@@ -148,7 +149,7 @@ class PythonTypes(WichmannHill):
         :rtype: long
         """
         # TODO: high and low cannot be bigger/smaller. why these values?
-        return self.randint(low, high)
+        return self.randrange(low, high+1)
 
     def pyfloat(self, left_digits=None, right_digits=None, positive=None):
         """ Generates a random float. Unset parameters are randomly generated.
@@ -160,13 +161,13 @@ class PythonTypes(WichmannHill):
         :rtype: float
         """
 
-        left_digits = left_digits or self.randint(1, float_info.dig)
-        right_digits = right_digits or self.randint(0, float_info.dig - left_digits)
-        sign = 1 if positive or self.randint(0, 1) else -1
+        left_digits = left_digits or self.randrange(1, float_info.dig+1)
+        right_digits = right_digits or self.randrange(0, float_info.dig - left_digits +1)
+        sign = 1 if positive or self.randrange(0, 2) else -1
 
         return float("{0}.{1}".format(
-            sign * self.randint(0, pow(10, left_digits) - 1),
-            self.randint(0, pow(10, right_digits) - 1)
+            sign * self.randrange(0, pow(10, left_digits)),
+            self.randrange(0, pow(10, right_digits))
         ))
 
     def pydecimal(self, left_digits=None, right_digits=None, positive=None):

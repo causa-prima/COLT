@@ -53,12 +53,22 @@ class Generator(object):
 
         for column, column_type in self.metadata.schema[keyspace_name][table_name].items():
             print column, column_type
-            if column_type == 'set<text>':
-                continue
             # get config arguments for the generator (if they exist)
             generator_args = {}
             if column in config:
                 generator_args = config[column]
+
+            # parse type(s) of collection types
+            if column_type[-1] is '>':
+                # strip the last char from column_type string and split it at <
+                column_type, _, elem_type = column_type[:-1].partition('<')
+
+                # maps have two data types for key and value
+                if column_type[0] is 'm':
+                    key_type, _, elem_type = elem_type.partition(',')
+                    generator_args['key_type'] = key_type
+
+                generator_args['elem_type'] = elem_type
 
             # call the generator for the type of the column
             res[column] = self.generator.implemented_types_switch[column_type](**generator_args)

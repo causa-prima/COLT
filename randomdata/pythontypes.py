@@ -85,7 +85,7 @@ class PythonTypes(WichmannHill):
         :rtype: uuid
         """
 
-        # code taken & adapted from standard python uuid library (/usr/lib/python2.6/uuid.py)
+        # code taken & adapted from standard python uuid library (/usr/lib/python2.7/uuid.py)
 
         nanoseconds = int(mktime(self.pydate().timetuple()) * 1e9)
         # 0x01b21dd213814000 is the number of 100-ns intervals between the

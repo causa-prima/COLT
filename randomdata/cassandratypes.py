@@ -36,6 +36,6 @@ class CassandraTypes(PythonTypes):
         :rtype: string
         """
         if ip_type == 'ipv4':
-            return '.'.join([str(self.choice(xrange(255))) for _ in xrange(4)])
+            return '.'.join([str(xrange(255)[int(self.random()*255)]) for _ in xrange(4)])
         else:
-            return ':'.join([hex(self.choice(xrange(65535)))[2:] for _ in xrange(8)])
+            return ':'.join([hex(xrange(65535)[int(self.random()*65535)])[2:] for _ in xrange(8)])

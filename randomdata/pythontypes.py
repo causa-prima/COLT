@@ -108,7 +108,7 @@ class PythonTypes(WichmannHill):
         :return: random bytearray
         :rtype: bytearray
         """
-        return bytearray([x for x in self.generator(size, 'int', low=0, high=255)])
+        return bytearray([self.randrange(0, 256) for x in xrange(size)])
 
     def pyboolean(self, chance_of_getting_true=50):
         """Generates a random boolean.
@@ -126,7 +126,8 @@ class PythonTypes(WichmannHill):
         :return: random string
         :rtype: string
         """
-        choice = [self.choice(printable) for _ in range(length)]
+        lp = len(printable)
+        choice = [printable[int(self.random() * lp)] for _ in range(length)]
         res = ''.join(choice)
         return res
 

@@ -47,6 +47,117 @@ class Generator(object):
         :rtype: dict
         """
 
+        res = {}
+        config = {}
+        if keyspace_name in self.config:
+            if table_name in self.config[keyspace_name]:
+                config = self.config[keyspace_name][table_name]
+
+        for column, column_type in self.metadata.schema[keyspace_name][table_name].items():
+            # reseed the generator for each column so we can
+            # re-generate data for each row easily
+            #
+            # source code of WichmannHill.seed, stripped to
+            # the necessary part for increase of performance
+            a = hash('%s%s' % (column, row_number))
+            a, x = divmod(a, 30268)
+            a, y = divmod(a, 30306)
+            a, z = divmod(a, 30322)
+            self.generator._seed = int(x)+1, int(y)+1, int(z)+1
+
+            # get config arguments for the generator (if they exist)
+            generator_args = {}
+            if column in config:
+                generator_args = config[column]
+
+            # parse type(s) of collection types
+            if column_type[-1] is '>':
+                # strip the last char from column_type string and split it at <
+                column_type, _, elem_type = column_type[:-1].partition('<')
+
+                # maps have two data types for key and value
+                if column_type[0] is 'm':
+                    key_type, _, elem_type = elem_type.partition(', ')
+                    generator_args['key_type'] = key_type
+
+                generator_args['elem_type'] = elem_type
+
+            # call the generator for the type of the column
+            res[column] = self.generator.implemented_types_switch[column_type](**generator_args)
+
+        return res
+
+    def generate_row_items(self, keyspace_name, table_name, columns):
+        """ Generate data from a column in a certain row.
+
+        :param string keyspace_name: name of the keyspace containing the table
+        :param string table_name: name of the table within the keyspace
+        :param dict columns: name of the columns with a list of seeds to generate data for
+        :return: data items of type of the column
+        :rtype: dict
+        """
+
+        res = {}
+        config = {}
+        if keyspace_name in self.config:
+            if table_name in self.config[keyspace_name]:
+                config = self.config[keyspace_name][table_name]
+
+        for column_name, seed_list in columns.items():
+            try:
+                column_type = self.metadata.schema[keyspace_name][table_name][column_name]
+            except KeyError:
+                msg = 'Column name "{}" not found in keyspace "{}", table "{}"'.format(
+                                                                                column_name,
+                                                                                keyspace_name,
+                                                                                table_name)
+                raise LookupError(msg)
+
+            # get config arguments for the generator (if they exist)
+            generator_args = {}
+            if column_name in config:
+                generator_args = config[column_name]
+
+            # parse type(s) of collection types
+            if column_type[-1] is '>':
+                # strip the last char from column_type string and split it at <
+                column_type, _, elem_type = column_type[:-1].partition('<')
+
+                # maps have two data types for key and value
+                if column_type[0] is 'm':
+                    key_type, _, elem_type = elem_type.partition(', ')
+                    generator_args['key_type'] = key_type
+
+                generator_args['elem_type'] = elem_type
+
+            # TODO: user-defined types introduced in C* 2.1
+
+            for seed in seed_list:
+                # reseed the generator for each column
+                #
+                # source code of WichmannHill.seed, stripped to
+                # the necessary part for increase of performance
+                a = hash('%s%s' % (column_name, seed))
+                a, x = divmod(a, 30268)
+                a, y = divmod(a, 30306)
+                a, z = divmod(a, 30322)
+                self.generator._seed = int(x)+1, int(y)+1, int(z)+1
+
+                # call the generator for the type of the column
+                res[column_name] = self.generator.implemented_types_switch[column_type](**generator_args)
+
+        return res
+
+    def generate_row_old(self, keyspace_name, table_name, row_number=0):
+        """ Generator one row of a table.
+
+        :param string keyspace_name: name of the keyspace containing the table
+        :param string table_name: name of the table within the keyspace
+        :param int row_number: number of the row to generate. default = 0
+        :return: dict with column names and corresponding values
+        :rtype: dict
+        """
+
         # reseed the generator for each row so we can
         # re-generate data for each row easily
         self.generator.seed(self.seed+row_number)
@@ -94,51 +205,7 @@ class Generator(object):
 
         return res
 
-    def generate_row2(self, keyspace_name, table_name, row_number=0):
-        """ Generator one row of a table.
-
-        :param string keyspace_name: name of the keyspace containing the table
-        :param string table_name: name of the table within the keyspace
-        :param int row_number: number of the row to generate. default = 0
-        :return: dict with column names and corresponding values
-        :rtype: dict
-        """
-
-        res = {}
-        config = {}
-        if keyspace_name in self.config:
-            if table_name in self.config[keyspace_name]:
-                config = self.config[keyspace_name][table_name]
-
-        for column, column_type in self.metadata.schema[keyspace_name][table_name].items():
-            # reseed the generator for each column so we can
-            # re-generate data for each row easily
-            self.generator.seed(column)
-            self.generator.jumpahead(self.seed+row_number)
-
-            # get config arguments for the generator (if they exist)
-            generator_args = {}
-            if column in config:
-                generator_args = config[column]
-
-            # parse type(s) of collection types
-            if column_type[-1] is '>':
-                # strip the last char from column_type string and split it at <
-                column_type, _, elem_type = column_type[:-1].partition('<')
-
-                # maps have two data types for key and value
-                if column_type[0] is 'm':
-                    key_type, _, elem_type = elem_type.partition(', ')
-                    generator_args['key_type'] = key_type
-
-                generator_args['elem_type'] = elem_type
-
-            # call the generator for the type of the column
-            res[column] = self.generator.implemented_types_switch[column_type](**generator_args)
-
-        return res
-
-    def generate_row_items(self, keyspace_name, table_name, column_names, row_number):
+    def generate_row_items_old(self, keyspace_name, table_name, column_names, row_number):
         """ Generate data from a column in a certain row.
 
         :param string keyspace_name: name of the keyspace containing the table
@@ -225,7 +292,7 @@ class Generator(object):
 
 
 test = Generator()
-'''
+
 def testprogramm():
     for _ in test.whole_table_generator('test', 'insanitytest', 100000):
         pass
@@ -233,20 +300,24 @@ def testprogramm():
     #    test.generate_row('test','insanitytest')
 import cProfile
 cProfile.run("testprogramm()", sort='time')
+
+'''
+from pycallgraph import PyCallGraph
+from pycallgraph.output import GraphvizOutput
+from pycallgraph import Config
+
+config = Config(max_depth=100, include_stdlib=True)
+with PyCallGraph(output=GraphvizOutput(output_file='/home/causa-prima/callgraph.png'), config=config):
+    for _ in test.whole_table_generator('test', 'insanitytest', 100):
+        pass
 '''
 '''
 numbers = set([0, 18706, 54552, 77609, 86727, 32664, 80992, 24563, 91197, 39624, 34807])
-numbers = set([0])
 
-for i in range(10):
+for i in range(100000):
     res = test.generate_row('test', 'test', i)
     if i in numbers:
         print i, res
 for number in sorted(numbers):
     print number, test.generate_row_items('test','test',set(['name','address','uid']),number)
 '''
-def testprogramm():
-    for _ in range(100000):
-        test.generate_row2('test','insanitytest')
-import cProfile
-cProfile.run("testprogramm()", sort='time')

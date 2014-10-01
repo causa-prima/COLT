@@ -2,19 +2,19 @@ from datetime import datetime
 from time import mktime
 from uuid import UUID
 from decimal import Decimal
-from random import WichmannHill
+from random import Random
 from string import printable
 from sys import float_info
 
 
-class PythonTypes(WichmannHill):
+class PythonTypes(Random):
     """
     Subclass of random.WichmannHill, implementing methods to generate some basic python types. Methods of this class
     have 'sane' default values to support easy data generation.
     """
 
     def __init__(self, seed=None):
-        WichmannHill.__init__(self, seed)
+        Random.__init__(self, seed)
         self.implemented_types_switch = dict(
             date=self.pydate,
             uuid=self.pyuuid,

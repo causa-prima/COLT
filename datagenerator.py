@@ -56,14 +56,8 @@ class Generator(object):
         for column, column_type in self.metadata.schema[keyspace_name][table_name].items():
             # reseed the generator for each column so we can
             # re-generate data for each row easily
-            #
-            # source code of WichmannHill.seed, stripped to
-            # the necessary part for increase of performance
             a = hash('%s%s' % (column, row_number))
-            a, x = divmod(a, 30268)
-            a, y = divmod(a, 30306)
-            a, z = divmod(a, 30322)
-            self.generator._seed = int(x)+1, int(y)+1, int(z)+1
+            self.generator.seed(a)
 
             # get config arguments for the generator (if they exist)
             generator_args = {}
@@ -134,14 +128,8 @@ class Generator(object):
 
             for seed in seed_list:
                 # reseed the generator for each column
-                #
-                # source code of WichmannHill.seed, stripped to
-                # the necessary part for increase of performance
                 a = hash('%s%s' % (column_name, seed))
-                a, x = divmod(a, 30268)
-                a, y = divmod(a, 30306)
-                a, z = divmod(a, 30322)
-                self.generator._seed = int(x)+1, int(y)+1, int(z)+1
+                self.generator.seed(a)
 
                 # call the generator for the type of the column
                 res[column_name] = self.generator.implemented_types_switch[column_type](**generator_args)
@@ -293,6 +281,7 @@ class Generator(object):
 
 test = Generator()
 
+
 def testprogramm():
     for _ in test.whole_table_generator('test', 'insanitytest', 100000):
         pass
@@ -300,6 +289,7 @@ def testprogramm():
     #    test.generate_row('test','insanitytest')
 import cProfile
 cProfile.run("testprogramm()", sort='time')
+
 
 '''
 from pycallgraph import PyCallGraph
@@ -319,5 +309,5 @@ for i in range(100000):
     if i in numbers:
         print i, res
 for number in sorted(numbers):
-    print number, test.generate_row_items('test','test',set(['name','address','uid']),number)
+    print number, test.generate_row_items('test','test',{'name':[number],'address':[number],'uid':[number]})
 '''

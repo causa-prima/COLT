@@ -9,7 +9,7 @@ from sys import float_info
 
 class PythonTypes(Random):
     """
-    Subclass of random.WichmannHill, implementing methods to generate some basic python types. Methods of this class
+    Subclass of random.Random, implementing methods to generate some basic python types. Methods of this class
     have 'sane' default values to support easy data generation.
     """
 
@@ -50,17 +50,6 @@ class PythonTypes(Random):
             except KeyError:
                 raise NotImplementedError(
                     'Generation of type {} not implemented in {}'.format(type_to_gen, self.__class__.__name__))
-
-    def getrandbits(self, bits):
-        """Generates a unsigned long with maximum value of 2^bits-1.
-        This function re-implements the getrandbits-method because the methods of all
-        python random number generators seems to rely on some unseedable source.
-
-        :param int bits: number of bits
-        :return: random number
-        :rtype: long or int, depending on size
-        """
-        return self.randrange(0, pow(2, bits))
 
     def pydate(self, start_date=None, end_date=None, start_timestamp=1388530800, end_timestamp=1420066799):
         """Generates a random timestamp between two dates given either as datetime or timestamp.
@@ -141,15 +130,14 @@ class PythonTypes(Random):
         """
         return self.randrange(low, high+1)
 
-    def pylong(self, low=-1 * ((1 << 52) - 2), high=1 << 53 - 1):
+    def pylong(self, low=-1 * (1 << 63), high=(1 << 63) - 1):
         """ Generates a random long integer.
 
-        :param optional long low: lower bound for return value, can be any integer. default = -4503599627370494
-        :param optional long high: upper bound for return value, can be any integer. default = 9007199254740991
+        :param optional long low: lower bound for return value, can be any integer. default = -9.223.372.036.854.775.808
+        :param optional long high: upper bound for return value, can be any integer. default = 9.223.372.036.854.775.807
         :return: random long integer
         :rtype: long
         """
-        # TODO: high and low cannot be bigger/smaller. why these values?
         return self.randrange(low, high+1)
 
     def pyfloat(self, left_digits=None, right_digits=None, positive=None):

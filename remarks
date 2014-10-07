@@ -1,4 +1,5 @@
-needed python packages (installed vie pip):
+needed python packages (installed via pip):
 - futures
 - blist (maybe no really needed, but was installed)
 - cassandra-driver
+- PyYAML

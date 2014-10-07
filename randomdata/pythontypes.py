@@ -1,7 +1,7 @@
 from datetime import datetime
 from time import mktime
 from uuid import UUID
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from random import Random
 from string import printable
 from sys import float_info
@@ -67,16 +67,19 @@ class PythonTypes(Random):
             end_timestamp = int(mktime(end_date.timetuple()))
         return datetime.fromtimestamp(self.randrange(start_timestamp, end_timestamp+1))
 
-    def pyuuid(self):
+    def pyuuid(self, timestamp=None):
         """Generates a random UUID.
 
+        :param timestamp: timestamp for UUID generation. default = None
         :return: random UUID
         :rtype: uuid
         """
 
         # code taken & adapted from standard python uuid library (/usr/lib/python2.7/uuid.py)
-
-        nanoseconds = int(mktime(self.pydate().timetuple()) * 1e9)
+        if timestamp is not None:
+            nanoseconds = int(timestamp * 1e9)
+        else:
+            nanoseconds = int(mktime(self.pydate().timetuple()) * 1e9)
         # 0x01b21dd213814000 is the number of 100-ns intervals between the
         # UUID epoch 1582-10-15 00:00:00 and the Unix epoch 1970-01-01 00:00:00.
         timestamp = int(nanoseconds // 100) + 0x01b21dd213814000L
@@ -99,24 +102,24 @@ class PythonTypes(Random):
         """
         return bytearray([self.randrange(0, 256) for x in xrange(size)])
 
-    def pyboolean(self, chance_of_getting_true=50):
+    def pyboolean(self, chance=.5):
         """Generates a random boolean.
 
-        :param optional int chance_of_getting_true: The chance of returning true, can be a integer 0-100. default = 50
+        :param optional float chance: the chance of returning true. default = .5
         :return: random boolean
         :rtype: boolean
         """
-        return self.randrange(1, 101) <= chance_of_getting_true
+        return self.random() <= chance
 
-    def pystring(self, length=10):
+    def pystring(self, size=10):
         """ Generates a random string.
 
-        :param optional int length: length of the string to generate. default = 10
+        :param optional int size: length of the string to generate. default = 10
         :return: random string
         :rtype: string
         """
         lp = len(printable)
-        choice = [printable[int(self.random() * lp)] for _ in range(length)]
+        choice = [printable[int(self.random() * lp)] for _ in range(size)]
         res = ''.join(choice)
         return res
 
@@ -140,47 +143,45 @@ class PythonTypes(Random):
         """
         return self.randrange(low, high+1)
 
-    def pyfloat(self, left_digits=None, right_digits=None, positive=None):
-        """ Generates a random float. Unset parameters are randomly generated.
+    def pyfloat(self, low=-3.4028235E38, high=3.4028235E38):
+        """Generates a random float.
 
-        :param optional int left_digits: number of digits left of comma. default = None
-        :param optional int right_digits: number of digits right of comma. default = None
-        :param optional boolean positive: should the generated float be positive. default = None
+        :param optional low: lower bound for return value. default = -3.4028235E38
+        :param optional high: upper bound for return value. default = 3.4028235E38
         :return: random float
         :rtype: float
         """
 
-        left_digits = left_digits or self.randrange(1, float_info.dig+1)
-        right_digits = right_digits or self.randrange(0, float_info.dig - left_digits +1)
-        sign = 1 if positive or self.randrange(0, 2) else -1
+        return self.uniform(low, high)
 
-        return float("{0}.{1}".format(
-            sign * self.randrange(0, pow(10, left_digits)),
-            self.randrange(0, pow(10, right_digits))
-        ))
+    def pydecimal(self,  low=-3.4028235E38, high=3.4028235E38, decimal_places=3):
+        """Generates a random decimal.
 
-    def pydecimal(self, left_digits=None, right_digits=None, positive=None):
-        """ Generates a random decimal. Unset parameters are randomly generated.
-
-        :param optional int left_digits: number of digits left of comma. default = None
-        :param optional int right_digits: number of digits right of comma. default = None
-        :param optional boolean positive: should the generated decimal be positive. default = None
-        :return: random float
-        :rtype: float
+        :param optional low: lower bound for return value. default = -3.4028235E38
+        :param optional high: upper bound for return value. default = 3.4028235E38
+        :param optional int decimal_places: number of decimal places. default = 3
+        :return: random decimal
+        :rtype: decimal
         """
-        return Decimal(str(self.pyfloat(left_digits, right_digits, positive)))
 
-    def pylist(self, elem_count=10, elem_type='int', **elem_args):
+        # The random method returns a float with to many decimal places.
+        # As there is no easy way to round a  Decimal, we need to change
+        # the Decimal precision locally.
+        with localcontext() as ctx:
+            ctx.prec = decimal_places
+            return +Decimal(self.uniform(low, high))
+
+    def pylist(self, elems=10, elem_type='int', **elem_args):
         """ Generates a list of definable length with items of definable type.
 
-        :param option int elem_count: length of list. default = 10
+        :param option int elems: length of list. default = 10
         :param optional string elem_type: type of elements in list. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of list elements
         :return: list of length elem_count with items of type elem_type
         :rtype: list
         """
         result = []
-        for _ in xrange(elem_count):
+        for _ in xrange(elems):
             try:
                 result.append(self.implemented_types_switch[elem_type](**elem_args))
             except KeyError:
@@ -188,10 +189,10 @@ class PythonTypes(Random):
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
         return result
 
-    def pydict(self, elem_count=10, key_type='int', elem_type='int', **elem_args):
+    def pydict(self, elems=10, key_type='int', elem_type='int', **elem_args):
         """ Generates a dict of definable size with keys and items of definable type.
 
-        :param optional int elem_count: size of dict. default = 10
+        :param optional int elems: size of dict. default = 10
         :param optional string key_type: type of dict keys. default = 'int'
         :param optional string elem_type: type of elements in dict. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of dict elements
@@ -199,7 +200,9 @@ class PythonTypes(Random):
         :rtype: dict
         """
         result = dict()
-        while len(result) < elem_count:
+        # Warning: it is not checked whether enough distinct keys
+        # can be generated, thus we could end up in an infinite loop!
+        while len(result) < elems:
             try:
                 result[self.implemented_types_switch[key_type]()] = (
                     self.implemented_types_switch[elem_type](**elem_args))
@@ -208,17 +211,19 @@ class PythonTypes(Random):
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
         return result
 
-    def pyset(self, elem_count=10, elem_type='int', **elem_args):
+    def pyset(self, elems=10, elem_type='int', **elem_args):
         """ Generates a set of definable size with items of definable type.
 
-        :param elem_count: size of set. default = 10
+        :param elems: size of set. default = 10
         :param elem_type: type of elements in set. default = 'int'
         :param elem_args: keyword dict of arguments for generation of set elements
         :return: set of size elem_count with items of type elem_type
         :rtype: set
         """
         result = set()
-        while len(result) < elem_count:
+        # Warning: it is not checked whether enough distinct elements
+        # can be generated, thus we could end up in an infinite loop!
+        while len(result) < elems:
             try:
                 result.add(self.implemented_types_switch[elem_type](**elem_args))
             except KeyError:

@@ -164,12 +164,10 @@ class PythonTypes(Random):
         :rtype: decimal
         """
 
-        # The random method returns a float with to many decimal places.
-        # As there is no easy way to round a  Decimal, we need to change
-        # the Decimal precision locally.
-        with localcontext() as ctx:
-            ctx.prec = decimal_places
-            return +Decimal(self.uniform(low, high))
+        # The random method returns a float with an unknown number of
+        # decimal places, so we round it or fill it with zeroes to the
+        # wanted number of decimal places.
+        return Decimal('%.*f' % (decimal_places, self.uniform(low, high)))
 
     def pylist(self, elems=10, elem_type='int', **elem_args):
         """ Generates a list of definable length with items of definable type.

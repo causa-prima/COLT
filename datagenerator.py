@@ -3,8 +3,25 @@ import time
 from randomdata.cassandratypes import CassandraTypes
 from cassandrametadata import CassandraMetadata
 
-
 class Generator(object):
+
+    def __init__(self, queue_in=None, queue_out=None,
+                 queue_target_size=0, queue_notify_threshold=0,
+                 needs_action=None, shutdown=None):
+
+        # queues
+        self.queue_in = queue_in
+        self.queue_out = queue_out
+
+        # queue sizes
+        self.queue_target_size = queue_target_size
+        self.queue_notify_threshold = queue_notify_threshold
+
+        # event
+        self.needs_action = needs_action
+        self.shutdown = shutdown
+
+class DataGenerator(Generator):
     def __init__(self, seed=None, connection_args_dict={}, config={}):
         """
         :param hashable seed: seed for the underlying PRNG.
@@ -82,22 +99,22 @@ class Generator(object):
         return res
 
     def generate_row_items(self, keyspace_name, table_name, columns):
-        """ Generate data from a column in a certain row.
+        """ Generate data from item_seed column in item_seed certain row.
 
         :param string keyspace_name: name of the keyspace containing the table
         :param string table_name: name of the table within the keyspace
-        :param dict columns: name of the columns with a list of seeds to generate data for
+        :param dict columns: name of the columns with item_seed seed to generate data for
         :return: data items of type of the column
         :rtype: dict
         """
 
-        res = {}
+        result = {}
         config = {}
         if keyspace_name in self.config:
             if table_name in self.config[keyspace_name]:
                 config = self.config[keyspace_name][table_name]
 
-        for column_name, seed_list in columns.items():
+        for column_name, seed in columns.items():
             try:
                 column_type = self.metadata.schema[keyspace_name][table_name][column_name]
             except KeyError:
@@ -126,21 +143,19 @@ class Generator(object):
 
             # TODO: user-defined types introduced in C* 2.1
 
-            res[column_name] = {}
-            for seed in seed_list:
-                # reseed the generator for each column
-                a = hash('%s%s' % (column_name, seed))
-                self.generator.seed(a)
+            # reseed the generator for each column
+            item_seed = hash('%s%s' % (column_name, seed))
+            self.generator.seed(item_seed)
 
-                # call the generator for the type of the column
-                res[column_name][seed] = self.generator.implemented_types_switch[column_type](**generator_args)
+            # call the generator for the type of the column
+            result[column_name] = self.generator.implemented_types_switch[column_type](**generator_args)
 
-        return res
+        return result
 
 
-test = Generator()
+test = DataGenerator()
 
-
+"""
 def testprogramm():
     for _ in test.whole_table_generator('test', 'insanitytest', 100000):
         pass
@@ -168,5 +183,4 @@ for i in range(100000):
     if i in numbers:
         print i, res
 for number in sorted(numbers):
-    print number, test.generate_row_items('test','test',{'name':[number],'address':[number],'uid':[number], 'lval':[number]})
-"""
+    print number, test.generate_row_items('test','test',{'name':number,'address':number,'uid':number, 'lval':number})

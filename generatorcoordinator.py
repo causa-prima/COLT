@@ -1,14 +1,11 @@
 from multiprocessing import Event, Lock, Process, Queue, Value
 
-from workloadgenerator import WorkloadGenerator
-from datagenerator import DataGenerator
-from querygenerator import QueryGenerator
-from logger import Logger
+from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogGenerator
 
 
 class GeneratorCoordinator(object):
 
-    def __init__(self, max_generated=0):
+    def __init__(self, max_generated=0, queue_target_size=100000, max_processes=50):
         # The GeneratorCoordinator spawns multiple processes for data
         # and query generation. Generators communicate via queues,
         # each generator shares a queue for input and/or output with
@@ -24,17 +21,18 @@ class GeneratorCoordinator(object):
         # can pass this on construction of the GeneratorCoordinator.
         # The value is stored in a unsigned long Value() with
         # integrated locking mechanism. Maximum is (2^64)-1.
+        # TODO: needs to be managed per table!
         self.max_generated = Value('L', max_generated)
 
         # target sizes of queues
-        self.queue_target_size = 10000
+        self.queue_target_size = queue_target_size
         # size at which the coordinator should be notified if queue
         # has less items than this.
-        self.queue_notify_threshold = .5 * self.queue_target_size
+        self.queue_notify_size = .5 * self.queue_target_size
 
         # Event for the coordinator to check if new processes have to
         # be created
-        self.needs_action = Event()
+        self.needs_supervision = Event()
         # Event to tell all child processes to shut down
         self.shutdown = Event()
 
@@ -45,6 +43,8 @@ class GeneratorCoordinator(object):
 
         # list of all running processes
         self.processes = []
+        # maximum number of processes
+        self.max_processes = max_processes
 
     def start(self):
         wl_generator = self.generate_generator('workload')
@@ -55,42 +55,47 @@ class GeneratorCoordinator(object):
         self.processes = [wl_generator, data_generator, query_generator, logger]
         for process in self.processes:
             process.start()
+
+        # wait for some time for the queues to fill before starting
+        # to supervise, but don't ignore the shutdown signal
+        self.shutdown.wait(5)
+
         self.supervise()
 
     def generate_generator(self, type):
         if type == 'workload':
-            return WorkloadGenerator(workloads=self.queue_next_workload,
-                                         max_generated=self.max_generated,
-                                         needs_action=self.needs_action, #needed?
-                                         shutdown=self.shutdown,
-                                         queue_target_size=self.queue_target_size,
-                                         queue_notify_threshold=self.queue_notify_threshold)
+            return WorkloadGenerator(out_queue=self.queue_next_workload,
+                                     max_generated=self.max_generated,
+                                     needs_supervision=self.needs_supervision, #needed?
+                                     shutdown=self.shutdown,
+                                     queue_target_size=self.queue_target_size,
+                                     queue_notify_size=self.queue_notify_size)
         if type == 'data':
-            return DataGenerator(workloads=self.queue_next_workload,
-                                       wl_data=self.queue_next_workload,
-                                         needs_action=self.needs_action,
-                                         shutdown=self.shutdown,
-                                         queue_target_size=self.queue_target_size,
-                                         queue_notify_threshold=self.queue_notify_threshold)
+            return DataGenerator(in_queue=self.queue_next_workload,
+                                 out_queue=self.queue_next_workload,
+                                 needs_supervision=self.needs_supervision,
+                                 shutdown=self.shutdown,
+                                 queue_target_size=self.queue_target_size,
+                                 queue_notify_size=self.queue_notify_size)
         if type == 'query':
-            return QueryGenerator(wl_data=self.queue_next_workload,
-                                         needs_action=self.needs_action,
-                                         shutdown=self.shutdown,
-                                         queue_target_size=self.queue_target_size,
-                                         queue_notify_threshold=self.queue_notify_threshold)
+            return QueryGenerator(in_queue=self.queue_next_workload,
+                                  needs_supervision=self.needs_supervision,
+                                  shutdown=self.shutdown,
+                                  queue_target_size=self.queue_target_size,
+                                  queue_notify_size=self.queue_notify_size)
         if type == 'logger':
-            return Logger(
-                                         needs_action=self.needs_action,
-                                         shutdown=self.shutdown,
-                                         queue_target_size=self.queue_target_size,
-                                         queue_notify_threshold=self.queue_notify_threshold)
+            return LogGenerator(#TODO: input and/or output queues needed?
+                                needs_supervision=self.needs_supervision,
+                                shutdown=self.shutdown,
+                                queue_target_size=self.queue_target_size,
+                                queue_notify_size=self.queue_notify_size)
 
     def supervise(self):
         while True:
             # wait until something has do be done, but at most 5[1] seconds
             #
             # [1] chosen by fair dice roll
-            if self.needs_action.wait(5) or self.shutdown.wait(5):
+            if self.needs_supervision.wait(5) or self.shutdown.wait(5):
 
                 # if it was decided it is time to shut down - do so!
                 if self.shutdown.is_set():
@@ -100,11 +105,11 @@ class GeneratorCoordinator(object):
                 new_processes = []
                 # check which queue needs more input and create the
                 # corresponding generator
-                if self.queue_next_workload.qsize() < self.queue_notify_threshold:
+                if self.queue_next_workload.qsize() < self.queue_notify_size:
                     new_processes.append(self.generate_generator('workload'))
-                if self.queue_workload_data.qsize() < self.queue_notify_threshold:
+                if self.queue_workload_data.qsize() < self.queue_notify_size:
                     new_processes.append(self.generate_generator('data'))
-                if self.queue_executed_queries.qsize() < self.queue_notify_threshold:
+                if self.queue_executed_queries.qsize() < self.queue_notify_size:
                     new_processes.append(self.generate_generator('query'))
 
                 # check if the logger needs more processes
@@ -117,8 +122,11 @@ class GeneratorCoordinator(object):
                     proc.start()
 
                 # reset the signal
-                self.needs_action.clear()
+                self.needs_supervision.clear()
 
                 # now wait for a second, but wake up if receiving the
                 # shutdown signal
                 self.shutdown.wait(1)
+        # Print the number of generated data items
+        print 'max_generated:', self.max_generated
+        # TODO: is there more that needs to be done before shutting down?

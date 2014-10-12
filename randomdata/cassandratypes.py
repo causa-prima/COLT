@@ -5,7 +5,7 @@ class CassandraTypes(PythonTypes):
     def __init__(self, seed=None):
         PythonTypes.__init__(self, seed)
         # add special cassandra types to the switch for easy mapping from metadata
-        new_implemented_types_switch = dict(
+        new_methods_switch = dict(
             ascii=self.pystring,
             bigint=self.pylong,
             blob=self.pybytearray,
@@ -26,7 +26,7 @@ class CassandraTypes(PythonTypes):
             map=self.pydict,
             set=self.pyset
         )
-        self.implemented_types_switch.update(new_implemented_types_switch)
+        self.methods_switch.update(new_methods_switch)
 
     def ip(self, ip_type='ipv4'):
         """Generates a random IP address.

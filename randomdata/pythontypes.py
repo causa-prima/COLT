@@ -15,7 +15,7 @@ class PythonTypes(Random):
 
     def __init__(self, seed=None):
         Random.__init__(self, seed)
-        self.implemented_types_switch = dict(
+        self.methods_switch = dict(
             date=self.pydate,
             uuid=self.pyuuid,
             bytearray=self.pybytearray,
@@ -45,7 +45,7 @@ class PythonTypes(Random):
         num = 0
         while num < n:
             try:
-                yield self.implemented_types_switch[type_to_gen](**args)
+                yield self.methods_switch[type_to_gen](**args)
                 num += 1
             except KeyError:
                 raise NotImplementedError(
@@ -181,7 +181,7 @@ class PythonTypes(Random):
         result = []
         for _ in xrange(elems):
             try:
-                result.append(self.implemented_types_switch[elem_type](**elem_args))
+                result.append(self.methods_switch[elem_type](**elem_args))
             except KeyError:
                 raise NotImplementedError(
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
@@ -202,8 +202,8 @@ class PythonTypes(Random):
         # can be generated, thus we could end up in an infinite loop!
         while len(result) < elems:
             try:
-                result[self.implemented_types_switch[key_type]()] = (
-                    self.implemented_types_switch[elem_type](**elem_args))
+                result[self.methods_switch[key_type]()] = (
+                    self.methods_switch[elem_type](**elem_args))
             except KeyError:
                 raise NotImplementedError(
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
@@ -223,7 +223,7 @@ class PythonTypes(Random):
         # can be generated, thus we could end up in an infinite loop!
         while len(result) < elems:
             try:
-                result.add(self.implemented_types_switch[elem_type](**elem_args))
+                result.add(self.methods_switch[elem_type](**elem_args))
             except KeyError:
                 raise NotImplementedError(
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))

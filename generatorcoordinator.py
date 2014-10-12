@@ -5,7 +5,7 @@ from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogG
 
 class GeneratorCoordinator(object):
 
-    def __init__(self, max_generated=0, queue_target_size=100000, max_processes=50):
+    def __init__(self, config, queue_target_size=100000, max_processes=50):
         # The GeneratorCoordinator spawns multiple processes for data
         # and query generation. Generators communicate via queues,
         # each generator shares a queue for input and/or output with
@@ -16,13 +16,38 @@ class GeneratorCoordinator(object):
         # Workload generators are supposed to "report" the generation
         # of new data via incrementing the max_generated_seed.
 
-        # The number of generated data items.
+        # The number of generated data items within each table.
         # If there was already data generated with by same rules one
-        # can pass this on construction of the GeneratorCoordinator.
-        # The value is stored in a unsigned long Value() with
+        # can state this in the config file for each table.
+        # The values are stored as a unsigned long Value() with
         # integrated locking mechanism. Maximum is (2^64)-1.
-        # TODO: needs to be managed per table!
-        self.max_generated = Value('L', max_generated)
+        # Because of the separation of data generation and querying
+        # two dicts are needed to handle both processes separately.
+        self.max_generated = {}
+        for keyspace in config['keyspaces'].keys():
+            self.max_generated[keyspace] = {}
+            for table in config['keyspaces'][keyspace].keys():
+                try:
+                    self.max_generated[keyspace][table] = Value('L', config['keyspaces'][keyspace][table]['max_generated'])
+                except KeyError:
+                    self.max_generated[keyspace][table] = Value('L', 0)
+
+        # TODO: numbers here can be incorrect on runtime
+        # That's because if an insert-query with some newly generated
+        # item gets executed, the executor raises the corresponding
+        # value in this dict unknowingly if he actually processed the
+        # item generated with that specific value. The real value
+        # processed could be number_of_query_executing_threads
+        # higher, so we have to keep that in mind mind generating new
+        # queries and when printing these numbers/ saving them.
+        self.max_inserted = {}
+        for keyspace in config['keyspaces'].keys():
+            self.max_inserted[keyspace] = {}
+            for table in config['keyspaces'][keyspace].keys():
+                try:
+                    self.max_inserted[keyspace][table] = Value('L', config['keyspaces'][keyspace][table]['max_generated'])
+                except KeyError:
+                    self.max_inserted[keyspace][table] = Value('L', 0)
 
         # target sizes of queues
         self.queue_target_size = queue_target_size
@@ -46,6 +71,8 @@ class GeneratorCoordinator(object):
         # maximum number of processes
         self.max_processes = max_processes
 
+        self.config = config
+
     def start(self):
         wl_generator = self.generate_generator('workload')
         data_generator = self.generate_generator('data')
@@ -65,30 +92,35 @@ class GeneratorCoordinator(object):
     def generate_generator(self, type):
         if type == 'workload':
             return WorkloadGenerator(out_queue=self.queue_next_workload,
-                                     max_generated=self.max_generated,
                                      needs_supervision=self.needs_supervision, #needed?
                                      shutdown=self.shutdown,
                                      queue_target_size=self.queue_target_size,
-                                     queue_notify_size=self.queue_notify_size)
+                                     queue_notify_size=self.queue_notify_size,
+                                     config=self.config,
+                                     max_generated=self.max_generated)
         if type == 'data':
             return DataGenerator(in_queue=self.queue_next_workload,
                                  out_queue=self.queue_next_workload,
                                  needs_supervision=self.needs_supervision,
                                  shutdown=self.shutdown,
                                  queue_target_size=self.queue_target_size,
-                                 queue_notify_size=self.queue_notify_size)
+                                 queue_notify_size=self.queue_notify_size,
+                                 config=self.config)
         if type == 'query':
             return QueryGenerator(in_queue=self.queue_next_workload,
                                   needs_supervision=self.needs_supervision,
                                   shutdown=self.shutdown,
                                   queue_target_size=self.queue_target_size,
-                                  queue_notify_size=self.queue_notify_size)
+                                  queue_notify_size=self.queue_notify_size,
+                                  config=self.config,
+                                  max_inserted=self.max_inserted)
         if type == 'logger':
             return LogGenerator(#TODO: input and/or output queues needed?
                                 needs_supervision=self.needs_supervision,
                                 shutdown=self.shutdown,
                                 queue_target_size=self.queue_target_size,
-                                queue_notify_size=self.queue_notify_size)
+                                queue_notify_size=self.queue_notify_size,
+                                config=self.config)
 
     def supervise(self):
         while True:
@@ -128,5 +160,5 @@ class GeneratorCoordinator(object):
                 # shutdown signal
                 self.shutdown.wait(1)
         # Print the number of generated data items
-        print 'max_generated:', self.max_generated
+        print 'max_inserted:', self.max_inserted
         # TODO: is there more that needs to be done before shutting down?

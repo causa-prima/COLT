@@ -15,7 +15,8 @@ class Generator(Process):
 
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None):
+                 needs_supervision=None, shutdown=None,
+                 config=None):
 
         # queues
         self.queue_in = queue_in
@@ -28,6 +29,10 @@ class Generator(Process):
         # events
         self.needs_supervision = needs_supervision
         self.shutdown = shutdown
+
+        # configuration
+        self.config = config
+
 
     def run(self):
         while True:
@@ -56,23 +61,81 @@ class WorkloadGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 max_generated=None, connection_args_dict={}):
-        """
-        :param optional dict connection_args_dict: dict containing the keyword arguments and values for connection establishment
-        :param optional dict config: dict containing the rules for generation of any data item. Keys not present use the default config.
-        """
+                 config=None, max_generated=None):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown)
+                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
 
         self.max_generated = max_generated
         self.generator = CassandraTypes()
 
-        self.metadata = CassandraMetadata(**connection_args_dict)
+        # aggregate the chances and map the chances of each workload
+        # into [0,ratio_sum]
+        self.ratio_sum = 0
+        self.ratio_nums = {}
+        for workload_name, workload_data in config['workloads'].items():
+            self.ratio_sum += workload_data['ratio']
+            self.ratio_nums[self.ratio_sum] = workload_name
 
     def process_item(self):
-        # TODO: implement
-        pass
+        # choose a workload to work on by picking a random int
+        # between 0 and ratio_sum
+        choice = self.generator.randint(0, self.ratio_sum)
+        choice = max(key for key in self.ratio_nums if key <= choice)
+
+        # get the chosen workload
+        workload_name = self.ratio_nums[choice]
+        workload = self.config['workloads'][workload_name]
+
+        #output:(workload,[queries]) with queries = [(new?,(column_type, seed, generator_args))]
+        queries = []
+        for query in workload['queries']:
+            q = []
+            new = False
+            # check if a new data item might be generated
+            if query['type'] == 'insert':
+                new = query['chance'] > self.generator.random()
+                keyspace = query['keyspace']
+                table = query['table']
+                # lock the counter for the table the item will be stored in
+                with self.max_generated[keyspace][table].get_lock():
+                    # increase the counter if a new item is generated
+                    self.max_generated[keyspace][table].value += new
+                    main_seed = self.max_generated[keyspace][table].value
+                # counter is now unlocked again
+
+                # seed the generator with that main_seed
+                self.generator.seed(main_seed)
+                # now determine if a whole new item will be generated
+                # or an old key gets new additional items
+                if new:
+                    # Save the main seed. In case we just add an item
+                    # the main seed will be an old one and the main
+                    # seed will only be used for the new items.
+                    old_key = main_seed
+                    add_item = query['item_chance'] > self.generator.random()
+                    if add_item:
+                        # We need an old key that created a whole new
+                        # item, so we iterate of the old keys until
+                        # we find one that did. If no key was ever
+                        # used to create a whole new item, we fall
+                        # back to seed zero, which always generates a
+                        # whole new item.
+                        for main_seed in self.generator.sample(xrange(main_seed), main_seed):
+                            self.generator.seed(main_seed)
+                            if query['item_chance'] > self.generator.random() or \
+                               old_key == 0:
+                                break
+                        else:
+                            # special case: no items have been generated yet
+                            main_seed = 0
+
+
+
+
+
+
+
 
 
 class DataGenerator(Generator):
@@ -80,10 +143,10 @@ class DataGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 connection_args_dict={}):
+                 config=None, connection_args_dict={}):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown)
+                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
 
         self.generator = CassandraTypes()
 
@@ -93,22 +156,27 @@ class DataGenerator(Generator):
         """
 
         # get and unpack the item we want to process
-        wl, queries = self.queue_in.get()
+        workload, queries = self.queue_in.get()
 
-        # each query within a workload can need multiple columns
-        for query, (column_name, column_type, conf) in queries.items():
+        # Each workload could have multiple queries. Each query could
+        # need multiple columns. Each column could be needed more
+        # than once. Each column instance could be needed with
+        # different configurations.
+        workload_data = []
+        for query in queries:
             results = []
-            # each column can be needed with different configurations
-            for seed, generator_args in conf:
+            for new, (type, seed, generator_args) in query:
+
                 # reseed the generator to generate the wanted item
                 self.generator.seed(seed)
-                results.append(self.generator.implemented_types_switch[column_type](**generator_args))
+                val = self.generator.methods_switch[type](**generator_args)
+                results.append((new, val))
 
             # replace the original list of configurations with the result list
-            queries[query] = (column_name, results)
+            workload_data.append(results)
 
         # repack the item and put it into the output queue
-        self.queue_out.put((wl, queries))
+        self.queue_out.put((workload, workload_data))
 
     def generate_items_old(self, keyspace_name, table_name, columns):
         """ Generate data from item_seed column in item_seed certain row.
@@ -161,7 +229,7 @@ class DataGenerator(Generator):
             self.generator.seed(item_seed)
 
             # call the generator for the type of the column
-            result[column_name] = self.generator.implemented_types_switch[column_type](**generator_args)
+            result[column_name] = self.generator.methods_switch[column_type](**generator_args)
 
         return result
 
@@ -170,11 +238,12 @@ class QueryGenerator(Generator):
     # TODO: implement
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None):
+                 needs_supervision=None, shutdown=None,
+                 config=None, max_inserted=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown)
+                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
 
     def process_item(self):
         pass
@@ -184,11 +253,12 @@ class LogGenerator(Generator):
     # TODO: implement
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None):
+                 needs_supervision=None, shutdown=None,
+                 config=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown)
+                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
 
     def process_item(self):
         pass

@@ -1,0 +1,34 @@
+keyspaces:
+  # Testkommentar
+  keyspace_name_1:
+    definition: keyspace_definition_1
+    tables:
+      table_name_1:
+        definition: table_definition_1
+        distributions:
+          column_name1:
+            size:
+      table_name_2:
+        definition: table_definition_2
+  keyspace_name_2:
+    definition: keyspace_definition_2
+    tables:
+      table_name_1: 
+        definition: table_definition_1
+      table_name_2:
+        definition: table_definition_2
+
+workloads:
+  workload_name_1:
+    queries: &id001
+      - querie_1
+      # Testkommentar
+      - querie_2
+    ratio: 20
+  workload_name_2:
+    queries:
+      - querie_3
+    ratio: 50
+  workload_name_3:
+    queries: *id001
+    ratio: 30

@@ -1,5 +1,7 @@
 needed python packages (installed via pip):
-- futures
-- blist (maybe no really needed, but was installed)
 - cassandra-driver
+- futures (dependency of cassandra-driver)
+- six (dependency of cassandra-driver)
 - PyYAML
+
+- blist (maybe no really needed, but was installed)

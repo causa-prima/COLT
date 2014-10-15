@@ -1,5 +1,7 @@
 from multiprocessing import Event, Lock, Process, Queue, Value
 
+from bitarray import bitarray
+
 from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogGenerator
 
 
@@ -23,14 +25,15 @@ class GeneratorCoordinator(object):
         # integrated locking mechanism. Maximum is (2^64)-1.
         # Because of the separation of data generation and querying
         # two dicts are needed to handle both processes separately.
-        self.max_generated = {}
+        self.key_structs = {}
         for keyspace in config['keyspaces'].keys():
-            self.max_generated[keyspace] = {}
+            self.key_structs[keyspace] = {}
             for table in config['keyspaces'][keyspace].keys():
-                try:
-                    self.max_generated[keyspace][table] = Value('L', config['keyspaces'][keyspace][table]['max_generated'])
-                except KeyError:
-                    self.max_generated[keyspace][table] = Value('L', 0)
+                key_struct = object()
+                key_struct.lock = Lock()
+                key_struct.bitmap = bitarray()
+                self.key_structs[keyspace][table] = key_struct
+                # TODO: import old key bitmap - or regenerate?
 
         # TODO: numbers here can be incorrect on runtime
         # That's because if an insert-query with some newly generated
@@ -45,7 +48,7 @@ class GeneratorCoordinator(object):
             self.max_inserted[keyspace] = {}
             for table in config['keyspaces'][keyspace].keys():
                 try:
-                    self.max_inserted[keyspace][table] = Value('L', config['keyspaces'][keyspace][table]['max_generated'])
+                    self.max_inserted[keyspace][table] = Value('L', config['keyspaces'][keyspace][table]['max_inserted'])
                 except KeyError:
                     self.max_inserted[keyspace][table] = Value('L', 0)
 
@@ -97,7 +100,7 @@ class GeneratorCoordinator(object):
                                      queue_target_size=self.queue_target_size,
                                      queue_notify_size=self.queue_notify_size,
                                      config=self.config,
-                                     max_generated=self.max_generated)
+                                     key_structs=self.key_structs)
         if type == 'data':
             return DataGenerator(in_queue=self.queue_next_workload,
                                  out_queue=self.queue_next_workload,

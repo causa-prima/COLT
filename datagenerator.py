@@ -61,16 +61,16 @@ class WorkloadGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 config=None, max_generated=None):
+                 config=None, key_structs=None):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
                            needs_supervision=needs_supervision, shutdown=shutdown, config=config)
 
-        self.max_generated = max_generated
+        self.key_structs = key_structs
         self.generator = CassandraTypes()
 
-        # aggregate the chances and map the chances of each workload
-        # into [0,ratio_sum]
+        # aggregate the chances and map the chances
+        # of each workload into [0,ratio_sum]
         self.ratio_sum = 0
         self.ratio_nums = {}
         for workload_name, workload_data in config['workloads'].items():
@@ -78,8 +78,8 @@ class WorkloadGenerator(Generator):
             self.ratio_nums[self.ratio_sum] = workload_name
 
     def process_item(self):
-        # choose a workload to work on by picking a random int
-        # between 0 and ratio_sum
+        # choose a workload to work on by picking
+        # a random int between 0 and ratio_sum
         choice = self.generator.randint(0, self.ratio_sum)
         choice = max(key for key in self.ratio_nums if key <= choice)
 
@@ -91,51 +91,83 @@ class WorkloadGenerator(Generator):
         queries = []
         for query in workload['queries']:
             q = []
-            new = False
+            # we need the bitmap of seeds that were used as primary keys
+            keyspace = query['keyspace']
+            table = query['table']
+            key_struct = self.key_structs[keyspace][table]
             # check if a new data item might be generated
             if query['type'] == 'insert':
-                new = query['chance'] > self.generator.random()
-                keyspace = query['keyspace']
-                table = query['table']
-                # lock the counter for the table the item will be stored in
-                with self.max_generated[keyspace][table].get_lock():
-                    # increase the counter if a new item is generated
-                    self.max_generated[keyspace][table].value += new
-                    main_seed = self.max_generated[keyspace][table].value
-                # counter is now unlocked again
-
-                # seed the generator with that main_seed
-                self.generator.seed(main_seed)
-                # now determine if a whole new item will be generated
-                # or an old key gets new additional items
-                if new:
-                    # Save the main seed. In case we just add an item
-                    # the main seed will be an old one and the main
-                    # seed will only be used for the new items.
-                    old_key = main_seed
-                    add_item = query['item_chance'] > self.generator.random()
-                    if add_item:
-                        # We need an old key that created a whole new
-                        # item, so we iterate of the old keys until
-                        # we find one that did. If no key was ever
-                        # used to create a whole new item, we fall
-                        # back to seed zero, which always generates a
-                        # whole new item.
-                        for main_seed in self.generator.sample(xrange(main_seed), main_seed):
-                            self.generator.seed(main_seed)
-                            if query['item_chance'] > self.generator.random() or \
-                               old_key == 0:
+                # lock the bitmap for the table the item will be stored in
+                with key_struct.lock:
+                    primary_seed = len(key_struct.bitmap)
+                    cluster_seed = primary_seed
+                    # seed the generator to produce regeneratable results
+                    self.generator.seed(primary_seed)
+                    # determine if this seed just generates
+                    # a new cluster for an old primary key
+                    new_cluster = query['chance'] > self.generator.random()
+                    if not new_cluster:
+                        # We need an old key that created a completely new
+                        # item, so we randomly iterate over old keys until we
+                        # find one that did. If no key was ever used to create
+                        # a completely new item, we fall back to seed zero,
+                        # which always generates a completely new item.
+                        while True:
+                            cluster_seed = self.generator.randrange(0, primary_seed+1)
+                            if key_struct.bitmap[cluster_seed] or cluster_seed == 0:
                                 break
-                        else:
-                            # special case: no items have been generated yet
-                            main_seed = 0
 
+                    # Tell the other processes what happened by appending the
+                    # choice we made to the bitmap. The or-part makes sure that
+                    # bitmap[0] is always 1, i.e. seed zero always generates a
+                    # completely new item
+                    key_struct.bitmap.append(new_cluster or cluster_seed == primary_seed)
 
+            elif query['type'] == 'select':
+                # Both a primary key and a cluster key are needed. Choose a
+                # random old seed and look what happened with that seed. If
+                # it generated a new cluster for another primary key, get that
+                # key by following the steps that originally led to that key.
+                with key_struct.lock:
+                    primary_seed = len(key_struct.bitmap)+1
+                    primary_seed = self.generator.randrange(0, primary_seed)
+                    cluster_seed = primary_seed
+                    # if this seed did not produce a completely new item the
+                    # primary key it
+                    if not key_struct.bitmap[primary_seed]:
+                        self.generator.seed(primary_seed)
+                        # When generating a new cluster it is first tested if
+                        # a new cluster will be generated by using a random
+                        # number, so we need to advance the generator one step.
+                        self.generator.random()
+                        # now we can search for the primary key that was used
+                        while True:
+                            cluster_seed = self.generator.randrange(0, primary_seed+1)
+                            if key_struct.bitmap[cluster_seed] or cluster_seed == 0:
+                                break
+            else:
+                msg = 'unsupported query type %s' % query[type]
+                raise NotImplementedError(msg)
 
+            # In case the query uses a cluster of a primary key the seeds have
+            # to be switched, otherwise they are identical.
+            if primary_seed != cluster_seed:
+                primary_seed, cluster_seed = cluster_seed, primary_seed
+            # Finally iterate over all the attributes of this query and append
+            # the needed metadata to the list of queries.
+            for attribute in query['attributes']:
+                if attribute['level'] == 'primary':
+                    seed = primary_seed
+                else:
+                    seed = cluster_seed
+                data = (attribute['type'], seed, attribute['generator_args'])
+                q.append((query['type'] == 'insert', data))
+            # append the data for this query to the
+            # list of queries for that workload
+            queries.append(q)
 
-
-
-
+        # put the workload with its data into the queue
+        self.queue_out.put((workload, queries))
 
 
 class DataGenerator(Generator):
@@ -169,7 +201,11 @@ class DataGenerator(Generator):
 
                 # reseed the generator to generate the wanted item
                 self.generator.seed(seed)
-                val = self.generator.methods_switch[type](**generator_args)
+                try:
+                    val = self.generator.methods_switch[type](**generator_args)
+                except KeyError:
+                    msg = "generator for type %s not implemented!" % type
+                    raise NotImplementedError(msg)
                 results.append((new, val))
 
             # replace the original list of configurations with the result list

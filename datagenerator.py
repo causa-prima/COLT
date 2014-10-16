@@ -61,12 +61,15 @@ class WorkloadGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 config=None, key_structs=None):
+                 config=None, key_structs=None, max_inserted=None):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
-                           queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
+                           queue_target_size=queue_target_size,
+                           queue_notify_size=queue_notify_size,
+                           needs_supervision=needs_supervision,
+                           shutdown=shutdown, config=config)
 
         self.key_structs = key_structs
+        self.max_inserted = max_inserted
         self.generator = CassandraTypes()
 
         # aggregate the chances and map the chances
@@ -87,7 +90,6 @@ class WorkloadGenerator(Generator):
         workload_name = self.ratio_nums[choice]
         workload = self.config['workloads'][workload_name]
 
-        #output:(workload,[queries]) with queries = [(new?,(column_type, seed, generator_args))]
         queries = []
         for query in workload['queries']:
             q = []
@@ -99,10 +101,10 @@ class WorkloadGenerator(Generator):
             if query['type'] == 'insert':
                 # lock the bitmap for the table the item will be stored in
                 with key_struct.lock:
-                    primary_seed = len(key_struct.bitmap)
-                    cluster_seed = primary_seed
+                    partition_seed = len(key_struct.bitmap)
+                    cluster_seed = partition_seed
                     # seed the generator to produce regeneratable results
-                    self.generator.seed(primary_seed)
+                    self.generator.seed(partition_seed)
                     # determine if this seed just generates
                     # a new cluster for an old primary key
                     new_cluster = query['chance'] > self.generator.random()
@@ -113,7 +115,7 @@ class WorkloadGenerator(Generator):
                         # a completely new item, we fall back to seed zero,
                         # which always generates a completely new item.
                         while True:
-                            cluster_seed = self.generator.randrange(0, primary_seed+1)
+                            cluster_seed = self.generator.randrange(0, partition_seed+1)
                             if key_struct.bitmap[cluster_seed] or cluster_seed == 0:
                                 break
 
@@ -121,46 +123,60 @@ class WorkloadGenerator(Generator):
                     # choice we made to the bitmap. The or-part makes sure that
                     # bitmap[0] is always 1, i.e. seed zero always generates a
                     # completely new item
-                    key_struct.bitmap.append(new_cluster or cluster_seed == primary_seed)
+                    key_struct.bitmap.append(new_cluster or cluster_seed == partition_seed)
 
-            elif query['type'] == 'select':
-                # Both a primary key and a cluster key are needed. Choose a
+            # query types other than insert need the partition and cluster key to
+            # access specific data. Note that:
+            #  - update takes an old item and inserts the same data that it
+            #    already had, because we would need another data structure
+            #    to mark an item as "updated" and record the changes
+            #  - deleted items are not recorded in any data structure, so they
+            #    might be part of other queries and produce errors or empty
+            #    result sets
+            elif query['type'] in ('select', 'update', 'delete'):
+                # Both a partition key and a cluster key are needed. Choose a
                 # random old seed and look what happened with that seed. If
-                # it generated a new cluster for another primary key, get that
+                # it generated a new cluster for another partition key, get that
                 # key by following the steps that originally led to that key.
+                with self.max_inserted.get_lock():
+                    partition_seed = self.max_inserted.value
+
+                partition_seed = self.generator.randrange(0, partition_seed)
+                cluster_seed = partition_seed
+
                 with key_struct.lock:
-                    primary_seed = len(key_struct.bitmap)+1
-                    primary_seed = self.generator.randrange(0, primary_seed)
-                    cluster_seed = primary_seed
                     # if this seed did not produce a completely new item the
-                    # primary key it
-                    if not key_struct.bitmap[primary_seed]:
-                        self.generator.seed(primary_seed)
+                    # partition key it did produce a new cluster for is needed
+                    if not key_struct.bitmap[partition_seed]:
+                        self.generator.seed(partition_seed)
                         # When generating a new cluster it is first tested if
                         # a new cluster will be generated by using a random
                         # number, so we need to advance the generator one step.
                         self.generator.random()
-                        # now we can search for the primary key that was used
+                        # now we can search for the partition key that was used
+                        # notice this takes 1/chance steps on average
                         while True:
-                            cluster_seed = self.generator.randrange(0, primary_seed+1)
+                            cluster_seed = self.generator.randrange(0, partition_seed+1)
                             if key_struct.bitmap[cluster_seed] or cluster_seed == 0:
                                 break
             else:
                 msg = 'unsupported query type %s' % query[type]
                 raise NotImplementedError(msg)
 
-            # In case the query uses a cluster of a primary key the seeds have
+            # In case the query uses a cluster of a partition key the seeds have
             # to be switched, otherwise they are identical.
-            if primary_seed != cluster_seed:
-                primary_seed, cluster_seed = cluster_seed, primary_seed
+            if partition_seed != cluster_seed:
+                partition_seed, cluster_seed = cluster_seed, partition_seed
             # Finally iterate over all the attributes of this query and append
             # the needed metadata to the list of queries.
             for attribute in query['attributes']:
-                if attribute['level'] == 'primary':
-                    seed = primary_seed
+                if attribute['level'] == 'partition':
+                    seed = partition_seed
                 else:
                     seed = cluster_seed
                 data = (attribute['type'], seed, attribute['generator_args'])
+                # append an object with a marker for new objects and the data
+                # to the list of queries
                 q.append((query['type'] == 'insert', data))
             # append the data for this query to the
             # list of queries for that workload
@@ -177,8 +193,10 @@ class DataGenerator(Generator):
                  needs_supervision=None, shutdown=None,
                  config=None, connection_args_dict={}):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
-                           queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
+                           queue_target_size=queue_target_size,
+                           queue_notify_size=queue_notify_size,
+                           needs_supervision=needs_supervision,
+                           shutdown=shutdown, config=config)
 
         self.generator = CassandraTypes()
 
@@ -196,7 +214,7 @@ class DataGenerator(Generator):
         # different configurations.
         workload_data = []
         for query in queries:
-            results = []
+            values = []
             for new, (type, seed, generator_args) in query:
 
                 # reseed the generator to generate the wanted item
@@ -206,10 +224,10 @@ class DataGenerator(Generator):
                 except KeyError:
                     msg = "generator for type %s not implemented!" % type
                     raise NotImplementedError(msg)
-                results.append((new, val))
+                values.append(val)
 
             # replace the original list of configurations with the result list
-            workload_data.append(results)
+            workload_data.append((new, values))
 
         # repack the item and put it into the output queue
         self.queue_out.put((workload, workload_data))
@@ -271,18 +289,42 @@ class DataGenerator(Generator):
 
 
 class QueryGenerator(Generator):
-    # TODO: implement
+
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 config=None, max_inserted=None):
+                 config=None, connection=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
-                           queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
+                           queue_target_size=queue_target_size,
+                           queue_notify_size=queue_notify_size,
+                           needs_supervision=needs_supervision,
+                           shutdown=shutdown, config=config)
+        # TODO: Are multiple connection objects needed or is it sufficient to share one over all QueryGenerators?
+        self.connection = connection
 
     def process_item(self):
-        pass
+        """ Generates queries with data from the input queue,
+        submits queries to the DB and puts a object that will
+        eventually receive the result into the output queue.
+        """
+
+        # get and unpack the item we want to process
+        workload, workload_data = self.queue_in.get()
+
+        query_num = 0
+        responses = []
+
+        for new, query_values in workload_data:
+            # for each query, get the prepared statement, call the connection
+            # object to bind and execute the query, and append the resulting
+            # object together with the 'new'-marker to the list of results
+            prep_stmnt = workload['queries'][query_num]['prepared_statement']
+            response = self.connection.execut(prep_stmnt, query_values)
+            query_num += 1
+            responses.add((new, response))
+
+        self.queue_out.put((workload, responses))
 
 
 class LogGenerator(Generator):
@@ -290,11 +332,15 @@ class LogGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 config=None):
+                 config=None, max_inserted=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
-                           queue_target_size=queue_target_size, queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision, shutdown=shutdown, config=config)
+                           queue_target_size=queue_target_size,
+                           queue_notify_size=queue_notify_size,
+                           needs_supervision=needs_supervision,
+                           shutdown=shutdown, config=config)
+
+        self.max_inserted = max_inserted
 
     def process_item(self):
         pass

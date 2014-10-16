@@ -25,8 +25,22 @@ class ConnectionInterface(object):
         self.shutdown()
         self.connect()
 
-    def execute(self, query):
-        """ Executes a given query non-blocking and asynchronously,
-        using logger.log_result and logger.log_error for responses.
+    def execute(self, query, parameters):
+        """ Binds parameters to a given query and executes it non-blocking and
+        asynchronously, returning an object from which the response can be
+        received.
+
+        :param query: the query to execute
+        :param parameters: the parameters to bind to the query before execution
+        :return: object that can receive the response
+        """
+        raise NotImplementedError
+
+    def handle_respons(self, response_object):
+        """ Handles the response that object will eventually get, ideally
+        non-blocking.
+
+        :param response_object: the object that will receive the response
+        :return:
         """
         raise NotImplementedError

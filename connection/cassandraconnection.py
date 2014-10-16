@@ -1,5 +1,8 @@
 from datetime import datetime
+
 from cassandra.cluster import Cluster
+from cassandra import OperationTimedOut
+
 from connectioninterface import ConnectionInterface
 from logger import Logger
 
@@ -20,29 +23,31 @@ class CassandraConnection(ConnectionInterface):
         """
         self.cluster.shutdown()
 
-    def execute(self, statement, parameters, workload_id, wl_query_id):
-        """ Execute prepared statement with parameters.
-         The query is executed non-blocking and asynchronously,
-         automatically logging the result.
+    def execute(self, statement, parameters):
+        """ Executes a prepared statement after binding given parameters.
+         The query is executed non-blocking and asynchronously.
 
-        :param cassandra.query.Statement statement: the prepared statement
-        :param parameters: parameters for the prepared statement
-        :param workload_id: workload identifier for logging
-        :param wl_query_id: workload query identifier for logging
+        :param cassandra.query.PreparedStatement statement: the prepared statement
+        :param list parameters: parameters to bind to the prepared statement
+        :return: ResponseFuture object for handling the result, entangled with the timestamp of the query execution
+        :rtype: Tuple(ResponseFuture, datetime.datetime)
         """
 
         # execute query asynchronously, returning a ResponseFuture-object
         # to which callbacks can be added
-        # TODO: set trace to True?
-        future = self.session.execute_async(statement, parameters)
-        future.add_callbacks(
-            callback=logger.log_results, callback_kwargs={
-                                                    'time_start': datetime.now(),
-                                                    'workload_id': workload_id,
-                                                    'wl_query_id': wl_query_id},
-            errback=logger.log_err, errback_kwargs={
-                                                'statement': statement,
-                                                'parameters': parameters,
-                                                'workload_id': workload_id,
-                                                'wl_query_id': wl_query_id}
-        )
+        return self.session.execute_async(statement, parameters), datetime.now()
+
+    def handle_response(self, response_object):
+        """ Waits for a response and logs the time of its arrival.
+
+        :param Tuple response_object: ResponseFuture object and the time of the query execution
+        """
+        future, start = response_object
+        try:
+            # wait until the response arrived or the default timeout strikes
+            future.result()
+            return start - datetime.now()
+        except OperationTimedOut as OTO:
+            msg = "Waiting for the response of query '%s' timed out.\n" % future.query
+            raise Warning(msg, OTO)
+            return None

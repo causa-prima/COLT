@@ -25,22 +25,14 @@ class ConnectionInterface(object):
         self.shutdown()
         self.connect()
 
-    def execute(self, query, parameters):
+    def execute(self, query, parameters, out_queue, metadata=None):
         """ Binds parameters to a given query and executes it non-blocking and
-        asynchronously, returning an object from which the response can be
-        received.
+        asynchronously, putting an object interpretable by the LogGenerator
+        into out_queue
 
         :param query: the query to execute
         :param parameters: the parameters to bind to the query before execution
-        :return: object that can receive the response
-        """
-        raise NotImplementedError
-
-    def handle_respons(self, response_object):
-        """ Handles the response that object will eventually get, ideally
-        non-blocking.
-
-        :param response_object: the object that will receive the response
-        :return:
+        :param out_queue: queue used by the LogGenerators to log events
+        :param metadata: metadata about the executed query. default = None
         """
         raise NotImplementedError

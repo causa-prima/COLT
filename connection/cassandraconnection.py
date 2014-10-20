@@ -1,12 +1,9 @@
 from datetime import datetime
 
 from cassandra.cluster import Cluster
-from cassandra import OperationTimedOut
 
 from connectioninterface import ConnectionInterface
-from logger import Logger
 
-logger = Logger()
 
 class CassandraConnection(ConnectionInterface):
 
@@ -23,31 +20,29 @@ class CassandraConnection(ConnectionInterface):
         """
         self.cluster.shutdown()
 
-    def execute(self, statement, parameters):
+    def execute(self, statement, parameters, queue_out, metadata=None):
         """ Executes a prepared statement after binding given parameters.
          The query is executed non-blocking and asynchronously.
 
         :param cassandra.query.PreparedStatement statement: the prepared statement
         :param list parameters: parameters to bind to the prepared statement
-        :return: ResponseFuture object for handling the result, entangled with the timestamp of the query execution
-        :rtype: Tuple(ResponseFuture, datetime.datetime)
+        :param multiprocessing.Queue queue_out: the queue in which to put the results
+        :param tuple metadata: metadata needed for logging. default = None
         """
 
+        # we need to wrap the queue.put() function to handle both callbacks
+        # (see there for further explanation)
+        fn = lambda err, start, mdata: queue_out.put((err, start, datetime.now(), mdata))
         # execute query asynchronously, returning a ResponseFuture-object
         # to which callbacks can be added
-        return self.session.execute_async(statement, parameters), datetime.now()
-
-    def handle_response(self, response_object):
-        """ Waits for a response and logs the time of its arrival.
-
-        :param Tuple response_object: ResponseFuture object and the time of the query execution
-        """
-        future, start = response_object
-        try:
-            # wait until the response arrived or the default timeout strikes
-            future.result()
-            return start - datetime.now()
-        except OperationTimedOut as OTO:
-            msg = "Waiting for the response of query '%s' timed out.\n" % future.query
-            raise Warning(msg, OTO)
-            return None
+        future = self.session.execute_async(statement, parameters)
+        # Add a callback to fn which puts data needed by the LogGenerator into
+        # the queue. The errback calls the stated function with the error as
+        # first positional parameter, the normal callback just calls it with
+        # the given parameters. To handle both cases the wrapper function fn is
+        # used, which gets 'None' as first parameter in the non-error-case.
+        future.add_callbacks(callback=fn, callback_args=(
+                            None, datetime.now(), metadata),
+                            errback=fn, errback_args=(
+                            (datetime.now(), metadata))
+                            )

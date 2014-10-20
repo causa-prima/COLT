@@ -103,26 +103,27 @@ class GeneratorCoordinator(object):
                                      key_structs=self.key_structs)
         if type == 'data':
             return DataGenerator(in_queue=self.queue_next_workload,
-                                 out_queue=self.queue_next_workload,
+                                 out_queue=self.queue_workload_data,
                                  needs_supervision=self.needs_supervision,
                                  shutdown=self.shutdown,
                                  queue_target_size=self.queue_target_size,
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config)
         if type == 'query':
-            return QueryGenerator(in_queue=self.queue_next_workload,
+            return QueryGenerator(in_queue=self.queue_workload_data,
+                                  out_queue=self.queue_executed_queries,
                                   needs_supervision=self.needs_supervision,
                                   shutdown=self.shutdown,
                                   queue_target_size=self.queue_target_size,
                                   queue_notify_size=self.queue_notify_size,
                                   config=self.config,
-                                  max_inserted=self.max_inserted)
+                                  max_inserted=self.max_inserted) # TODO: hand over a connection object
         if type == 'logger':
-            return LogGenerator(#TODO: input and/or output queues needed?
+            return LogGenerator(in_queue=self.queue_executed_queries,
                                 needs_supervision=self.needs_supervision,
                                 shutdown=self.shutdown,
-                                queue_target_size=self.queue_target_size,
-                                queue_notify_size=self.queue_notify_size,
+                                queue_target_size=1,
+                                queue_notify_size=10, # time a item is allowed to be queued TODO: set it to value of connection/query timeout
                                 config=self.config)
 
     def supervise(self):

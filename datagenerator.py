@@ -1,8 +1,8 @@
-from datetime import datetime
-import time
 from multiprocessing import Process
+from time import time
+from datetime import datetime
+
 from randomdata.cassandratypes import CassandraTypes
-from cassandrametadata import CassandraMetadata
 
 
 class Generator(Process):
@@ -37,12 +37,12 @@ class Generator(Process):
     def run(self):
         while True:
             # check whether there is already enough data in the
-            # output queue, if so wait for some time.
-            while (self.queue_out is not None) and\
-                    (self.queue_out.qsize() > self.queue_target_size) and\
+            # output queue, if not wait for some time.
+            if (self.queue_out is not None) and\
+                    (self.queue_out.qsize() < self.queue_target_size) and\
                     not self.shutdown.is_set():
-                # wait, but don't ignore the shutdown signal
-                self.shutdown.wait(1)
+                # wait for more input, but don't ignore the shutdown signal
+                self.shutdown.wait(.1)
 
             # if it was decided it is time to shut down - do so!
             if self.shutdown.is_set():
@@ -313,26 +313,24 @@ class QueryGenerator(Generator):
         workload, workload_data = self.queue_in.get()
 
         query_num = 0
-        responses = []
 
         for new, query_values in workload_data:
-            # for each query, get the prepared statement, call the connection
-            # object to bind and execute the query, and append the resulting
-            # object together with the 'new'-marker to the list of results
+            # for each query, get the prepared statement and call the connection
+            # object to bind and execute the query, which automatically puts
+            # resulting execution times into the out_queue
             prep_stmnt = workload['queries'][query_num]['prepared_statement']
-            response = self.connection.execut(prep_stmnt, query_values)
-            query_num += 1
-            responses.add((new, response))
+            self.connection.execute(prep_stmnt, query_values, self.queue_out,
+                                    metadata=(workload, query_num, new))
 
-        self.queue_out.put((workload, responses))
+            query_num += 1
 
 
 class LogGenerator(Generator):
-    # TODO: implement
+
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 config=None, max_inserted=None):
+                 config=None, max_inserted=None, logs=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
@@ -341,9 +339,39 @@ class LogGenerator(Generator):
                            shutdown=shutdown, config=config)
 
         self.max_inserted = max_inserted
+        self.logs = logs
+
+    # the standard "run" method has to be overridden
+    # as it checks for the wrong conditions
+
+    def run(self):
+        while True:
+            # check whether there is already enough data in the
+            # output queue, if not wait until there is
+            while (self.queue_out is not None) and\
+                    (self.queue_out.qsize() < self.queue_target_size) and\
+                    not self.shutdown.is_set():
+                # wait for more input, but don't ignore the shutdown signal
+                if self.shutdown.wait(.1):
+                    break
+
+            # if it was decided it is time to shut down - do so!
+            if self.shutdown.is_set():
+                break
+
+            # there is something to do, so let's go!
+            self.process_item()
 
     def process_item(self):
-        pass
+        err, start, end, metadata = self.queue_in.get()
+        now = time()
+        time_in_queue = (datetime.fromtimestamp(now) - end).seconds
+        # check whether more processes are needed
+        if time_in_queue > self.queue_notify_size and\
+                self.queue_in.qsize() > self.queue_target_size:
+            self.needs_supervision.set()
+        # TODO: add a log-object to the coordinator and fill it with data
+
 
 test = DataGenerator()
 

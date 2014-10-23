@@ -36,13 +36,7 @@ class GeneratorCoordinator(object):
                 # TODO: import old key bitmap - or regenerate?
 
         # TODO: numbers here can be incorrect on runtime
-        # That's because if an insert-query with some newly generated
-        # item gets executed, the executor raises the corresponding
-        # value in this dict unknowingly if he actually processed the
-        # item generated with that specific value. The real value
-        # processed could be number_of_query_executing_threads
-        # higher, so we have to keep that in mind mind generating new
-        # queries and when printing these numbers/ saving them.
+        # See LogGenerator's process_item for further information.
         self.max_inserted = {}
         for keyspace in config['keyspaces'].keys():
             self.max_inserted[keyspace] = {}
@@ -58,16 +52,25 @@ class GeneratorCoordinator(object):
         # has less items than this.
         self.queue_notify_size = .5 * self.queue_target_size
 
-        # Event for the coordinator to check if new processes have to
-        # be created
-        self.needs_supervision = Event()
+        # Events for the coordinator to check if new processes have to be
+        # created. Each class of generators gets it own Event.
+        self.events = {}
+        self.events['DataGenerators'] = Event()
+        self.events['QueryGenerators'] = Event()
+        self.events['LogGenerators'] = Event()
+
         # Event to tell all child processes to shut down
-        self.shutdown = Event()
+        self.events['shutdown'] = Event()
 
         # All the queues needed for inter process communication
         self.queue_next_workload = Queue()
         self.queue_workload_data = Queue()
         self.queue_executed_queries = Queue()
+
+        # Log data of execution times
+        self.logs = object()
+        self.logs.lock = Lock()
+        self.logs.values = {}
 
         # list of all running processes
         self.processes = []
@@ -88,15 +91,14 @@ class GeneratorCoordinator(object):
 
         # wait for some time for the queues to fill before starting
         # to supervise, but don't ignore the shutdown signal
-        self.shutdown.wait(5)
+        self.events['shutdown'].wait(5)
 
         self.supervise()
 
     def generate_generator(self, type):
         if type == 'workload':
             return WorkloadGenerator(out_queue=self.queue_next_workload,
-                                     needs_supervision=self.needs_supervision, #needed?
-                                     shutdown=self.shutdown,
+                                     shutdown=self.events['shutdown'],
                                      queue_target_size=self.queue_target_size,
                                      queue_notify_size=self.queue_notify_size,
                                      config=self.config,
@@ -104,26 +106,29 @@ class GeneratorCoordinator(object):
         if type == 'data':
             return DataGenerator(in_queue=self.queue_next_workload,
                                  out_queue=self.queue_workload_data,
-                                 needs_supervision=self.needs_supervision,
-                                 shutdown=self.shutdown,
+                                 needs_supervision=self.events['DataGenerators'],
+                                 shutdown=self.events['shutdown'],
                                  queue_target_size=self.queue_target_size,
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config)
         if type == 'query':
             return QueryGenerator(in_queue=self.queue_workload_data,
                                   out_queue=self.queue_executed_queries,
-                                  needs_supervision=self.needs_supervision,
-                                  shutdown=self.shutdown,
+                                  needs_supervision=self.events['QueryGenerators'],
+                                  shutdown=self.events['shutdown'],
                                   queue_target_size=self.queue_target_size,
                                   queue_notify_size=self.queue_notify_size,
                                   config=self.config,
                                   max_inserted=self.max_inserted) # TODO: hand over a connection object
         if type == 'logger':
             return LogGenerator(in_queue=self.queue_executed_queries,
-                                needs_supervision=self.needs_supervision,
-                                shutdown=self.shutdown,
-                                queue_target_size=1,
-                                queue_notify_size=10, # time a item is allowed to be queued TODO: set it to value of connection/query timeout
+                                needs_supervision=self.events['LogGenerators'],
+                                shutdown=self.events['shutdown'],
+                                queue_target_size=self.queue_target_size,
+                                # time a item is allowed to be queued
+                                # TODO: set it to value of connection/query timeout
+                                queue_notify_size=10,
+                                logs=self.logs,
                                 config=self.config)
 
     def supervise(self):
@@ -131,10 +136,10 @@ class GeneratorCoordinator(object):
             # wait until something has do be done, but at most 5[1] seconds
             #
             # [1] chosen by fair dice roll
-            if self.needs_supervision.wait(5) or self.shutdown.wait(5):
+            if self.needs_supervision.wait(5) or self.events.shutdown.wait(5):
 
                 # if it was decided it is time to shut down - do so!
-                if self.shutdown.is_set():
+                if self.events.shutdown.is_set():
                     # TODO: wait for child processes to exit?
                     break
 
@@ -162,7 +167,7 @@ class GeneratorCoordinator(object):
 
                 # now wait for a second, but wake up if receiving the
                 # shutdown signal
-                self.shutdown.wait(1)
+                self.events.shutdown.wait(1)
         # Print the number of generated data items
         print 'max_inserted:', self.max_inserted
         # TODO: is there more that needs to be done before shutting down?

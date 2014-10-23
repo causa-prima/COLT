@@ -37,9 +37,9 @@ class Generator(Process):
     def run(self):
         while True:
             # check whether there is already enough data in the
-            # output queue, if not wait for some time.
+            # output queue, and wait for some time if there is.
             if (self.queue_out is not None) and\
-                    (self.queue_out.qsize() < self.queue_target_size) and\
+                    (self.queue_out.qsize() > self.queue_target_size) and\
                     not self.shutdown.is_set():
                 # wait for more input, but don't ignore the shutdown signal
                 self.shutdown.wait(.1)
@@ -49,7 +49,8 @@ class Generator(Process):
                 break
 
             # check whether more input is needed
-            if (self.queue_in is not None) and (self.queue_in.qsize() < self.queue_notify_size):
+            if (self.queue_in is not None) and\
+                    (self.queue_in.qsize() < self.queue_notify_size):
                 self.needs_supervision.set()
 
             # there is something to do, so let's go!
@@ -125,8 +126,8 @@ class WorkloadGenerator(Generator):
                     # completely new item
                     key_struct.bitmap.append(new_cluster or cluster_seed == partition_seed)
 
-            # query types other than insert need the partition and cluster key to
-            # access specific data. Note that:
+            # query types other than insert need the partition and cluster key
+            # to access specific data. Note that:
             #  - update takes an old item and inserts the same data that it
             #    already had, because we would need another data structure
             #    to mark an item as "updated" and record the changes
@@ -135,9 +136,13 @@ class WorkloadGenerator(Generator):
             #    result sets
             elif query['type'] in ('select', 'update', 'delete'):
                 # Both a partition key and a cluster key are needed. Choose a
-                # random old seed and look what happened with that seed. If
-                # it generated a new cluster for another partition key, get that
+                # random old seed and look what happened with that seed. If it
+                # generated a new cluster for another partition key, get that
                 # key by following the steps that originally led to that key.
+
+                # Note that this number does not necessarily represent the seed
+                # that was used to generate the new item. For further
+                # information check the LogGenerator's process_item method.
                 with self.max_inserted.get_lock():
                     partition_seed = self.max_inserted.value
 
@@ -330,7 +335,7 @@ class LogGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_supervision=None, shutdown=None,
-                 config=None, max_inserted=None, logs=None):
+                 config=None, max_inserted=None, logs=None, max_time=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
@@ -339,38 +344,61 @@ class LogGenerator(Generator):
                            shutdown=shutdown, config=config)
 
         self.max_inserted = max_inserted
+        # dict to log the execution times as datetime.timedelta
         self.logs = logs
+        self.max_time = max_time
 
     # the standard "run" method has to be overridden
     # as it checks for the wrong conditions
-
     def run(self):
         while True:
-            # check whether there is already enough data in the
-            # output queue, if not wait until there is
-            while (self.queue_out is not None) and\
-                    (self.queue_out.qsize() < self.queue_target_size) and\
-                    not self.shutdown.is_set():
-                # wait for more input, but don't ignore the shutdown signal
-                if self.shutdown.wait(.1):
-                    break
-
             # if it was decided it is time to shut down - do so!
             if self.shutdown.is_set():
                 break
+
+            # check whether there is already enough data in the
+            # input queue, if not notify the coordinator
+            if self.queue_in.qsize() > self.queue_target_size:
+                self.needs_supervision.set()
 
             # there is something to do, so let's go!
             self.process_item()
 
     def process_item(self):
-        err, start, end, metadata = self.queue_in.get()
+        err, start, end, (workload, query_num, new) = self.queue_in.get()
         now = time()
         time_in_queue = (datetime.fromtimestamp(now) - end).seconds
-        # check whether more processes are needed
+        # check whether more LogGenerator processes are needed
         if time_in_queue > self.queue_notify_size and\
                 self.queue_in.qsize() > self.queue_target_size:
             self.needs_supervision.set()
-        # TODO: add a log-object to the coordinator and fill it with data
+
+        # do not log execution times of errors
+        if not err:
+            with self.logs.lock:
+                try:
+                    self.logs.values[int(now)] += end - start
+                except KeyError:
+                    self.logs.values[int(now)] = end - start
+
+        # If a new item was generated, the max_inserted counter needs to be
+        # incremented for the WorkloadGenerators to notice this.
+        # Note that this number does not necessarily represent the seed that
+        # was used to generate the new item, as queries should happen
+        # asynchronously. To guarantee that max_inserted equals the maximum
+        # seed related to an item in the database, another way of storing this
+        # information would be needed. This would introduce more complexity and
+        # overhead. The chosen approach should work well enough as long as no
+        # errors occur when inserting new data, hence this case should be
+        # considered.
+        if new:
+            if err:
+                msg = 'New item should have been inserted, but an error occured.'
+                raise Warning(msg)
+            with self.max_inserted.get_lock():
+                self.max_inserted.value += 1
+
+
 
 
 test = DataGenerator()

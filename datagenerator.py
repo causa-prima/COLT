@@ -15,7 +15,7 @@ class Generator(Process):
 
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None,
+                 needs_more_input=None, shutdown=None,
                  config=None):
 
         # queues
@@ -27,7 +27,7 @@ class Generator(Process):
         self.queue_notify_size = queue_notify_size
 
         # events
-        self.needs_supervision = needs_supervision
+        self.needs_more_input = needs_more_input
         self.shutdown = shutdown
 
         # configuration
@@ -36,13 +36,14 @@ class Generator(Process):
 
     def run(self):
         while True:
-            # check whether there is already enough data in the
-            # output queue, and wait for some time if there is.
-            if (self.queue_out is not None) and\
+            # Check whether there is already enough data in the
+            # output queue, and wait while there is.
+            while (self.queue_out is not None) and\
                     (self.queue_out.qsize() > self.queue_target_size) and\
                     not self.shutdown.is_set():
                 # wait for more input, but don't ignore the shutdown signal
-                self.shutdown.wait(.1)
+                # TODO: How long should be waited?
+                self.shutdown.wait(.01)
 
             # if it was decided it is time to shut down - do so!
             if self.shutdown.is_set():
@@ -51,7 +52,7 @@ class Generator(Process):
             # check whether more input is needed
             if (self.queue_in is not None) and\
                     (self.queue_in.qsize() < self.queue_notify_size):
-                self.needs_supervision.set()
+                self.needs_more_input.set()
 
             # there is something to do, so let's go!
             self.process_item()
@@ -61,12 +62,12 @@ class WorkloadGenerator(Generator):
 
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None,
+                 needs_more_input=None, shutdown=None,
                  config=None, key_structs=None, max_inserted=None):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision,
+                           needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
 
         self.key_structs = key_structs
@@ -195,12 +196,12 @@ class DataGenerator(Generator):
 
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None,
+                 needs_more_input=None, shutdown=None,
                  config=None, connection_args_dict={}):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision,
+                           needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
 
         self.generator = CassandraTypes()
@@ -297,13 +298,13 @@ class QueryGenerator(Generator):
 
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None,
+                 needs_more_input=None, shutdown=None,
                  config=None, connection=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision,
+                           needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
         # TODO: Are multiple connection objects needed or is it sufficient to share one over all QueryGenerators?
         self.connection = connection
@@ -334,44 +335,30 @@ class LogGenerator(Generator):
 
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
-                 needs_supervision=None, shutdown=None,
-                 config=None, max_inserted=None, logs=None, max_time=None):
+                 needs_more_input=None, shutdown=None,
+                 config=None, max_inserted=None, logs=None,
+                 queue_max_time=None, needs_more_processes=None):
 
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
-                           needs_supervision=needs_supervision,
+                           needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
 
         self.max_inserted = max_inserted
         # dict to log the execution times as datetime.timedelta
         self.logs = logs
-        self.max_time = max_time
-
-    # the standard "run" method has to be overridden
-    # as it checks for the wrong conditions
-    def run(self):
-        while True:
-            # if it was decided it is time to shut down - do so!
-            if self.shutdown.is_set():
-                break
-
-            # check whether there is already enough data in the
-            # input queue, if not notify the coordinator
-            if self.queue_in.qsize() > self.queue_target_size:
-                self.needs_supervision.set()
-
-            # there is something to do, so let's go!
-            self.process_item()
+        self.queue_max_time = queue_max_time
+        self.needs_more_processes = needs_more_processes
 
     def process_item(self):
         err, start, end, (workload, query_num, new) = self.queue_in.get()
         now = time()
         time_in_queue = (datetime.fromtimestamp(now) - end).seconds
         # check whether more LogGenerator processes are needed
-        if time_in_queue > self.queue_notify_size and\
-                self.queue_in.qsize() > self.queue_target_size:
-            self.needs_supervision.set()
+        if time_in_queue > self.queue_max_time or\
+                        self.queue_in.qsize() > self.queue_target_size:
+            self.needs_more_processes.set()
 
         # do not log execution times of errors
         if not err:

@@ -52,20 +52,21 @@ class GeneratorCoordinator(object):
         # has less items than this.
         self.queue_notify_size = .5 * self.queue_target_size
 
+        # All the queues needed for inter process communication
+        self.queues = {'next_workload': Queue(),
+                       'workload_data': Queue(),
+                       'executed_queries': Queue()}
+
         # Events for the coordinator to check if new processes have to be
         # created. Each class of generators gets it own Event.
-        self.events = {}
-        self.events['DataGenerators'] = Event()
-        self.events['QueryGenerators'] = Event()
-        self.events['LogGenerators'] = Event()
+        self.events = {'DataGenerators': Event(), 'QueryGenerators': Event(),
+                       'LogGenerators': Event(), 'LogGenerators2': Event(),
+                       'shutdown': Event()}
 
         # Event to tell all child processes to shut down
-        self.events['shutdown'] = Event()
 
-        # All the queues needed for inter process communication
-        self.queue_next_workload = Queue()
-        self.queue_workload_data = Queue()
-        self.queue_executed_queries = Queue()
+        # convenience event to wait for all events simultaneously
+        self.supervision_needed = OrEvent(self.events.values())
 
         # Log data of execution times
         self.logs = object()
@@ -97,64 +98,79 @@ class GeneratorCoordinator(object):
 
     def generate_generator(self, type):
         if type == 'workload':
-            return WorkloadGenerator(out_queue=self.queue_next_workload,
+            return WorkloadGenerator(queue_out=self.queues['next_workload'],
                                      shutdown=self.events['shutdown'],
                                      queue_target_size=self.queue_target_size,
                                      queue_notify_size=self.queue_notify_size,
                                      config=self.config,
                                      key_structs=self.key_structs)
         if type == 'data':
-            return DataGenerator(in_queue=self.queue_next_workload,
-                                 out_queue=self.queue_workload_data,
-                                 needs_supervision=self.events['DataGenerators'],
+            return DataGenerator(queue_in=self.queues['next_workload'],
+                                 queue_out=self.queues['workload_data'],
+                                 needs_more_input=self.events['DataGenerators'],
                                  shutdown=self.events['shutdown'],
                                  queue_target_size=self.queue_target_size,
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config)
         if type == 'query':
-            return QueryGenerator(in_queue=self.queue_workload_data,
-                                  out_queue=self.queue_executed_queries,
-                                  needs_supervision=self.events['QueryGenerators'],
+            return QueryGenerator(queue_in=self.queues['workload_data'],
+                                  queue_out=self.queues['executed_queries'],
+                                  needs_more_input=self.events['QueryGenerators'],
                                   shutdown=self.events['shutdown'],
                                   queue_target_size=self.queue_target_size,
                                   queue_notify_size=self.queue_notify_size,
-                                  config=self.config,
-                                  max_inserted=self.max_inserted) # TODO: hand over a connection object
+                                  config=self.config) # TODO: hand over a connection object
         if type == 'logger':
-            return LogGenerator(in_queue=self.queue_executed_queries,
-                                needs_supervision=self.events['LogGenerators'],
+            return LogGenerator(queue_in=self.queues['executed_queries'],
+                                needs_more_input=self.events['LogGenerators'],
                                 shutdown=self.events['shutdown'],
                                 queue_target_size=self.queue_target_size,
-                                # time a item is allowed to be queued
+                                queue_notify_size=self.queue_notify_size,
+                                config=self.config,
+                                # time an item is allowed to be queued
                                 # TODO: set it to value of connection/query timeout
-                                queue_notify_size=10,
+                                queue_max_time=10,
+                                max_inserted=self.max_inserted,
                                 logs=self.logs,
-                                config=self.config)
+                                needs_more_processes=self.events['LogGenerators2'])
 
     def supervise(self):
+        events = self.events
+        queues = self.queues
+        notify_size = self.queue_notify_size
+        target_size = self.queue_target_size
         while True:
-            # wait until something has do be done, but at most 5[1] seconds
-            #
-            # [1] chosen by fair dice roll
-            if self.needs_supervision.wait(5) or self.events.shutdown.wait(5):
+            # wait until something has do be done
+            self.supervision_needed.wait()
+
+            # check if any process set an event
+            if self.supervision_needed.is_set():
 
                 # if it was decided it is time to shut down - do so!
-                if self.events.shutdown.is_set():
-                    # TODO: wait for child processes to exit?
+                if events['shutdown'].is_set():
+                    # wait for all child processes to end before leaving the
+                    # while-loop
+                    for proc in self.processes:
+                        proc.join()
                     break
 
                 new_processes = []
+
                 # check which queue needs more input and create the
-                # corresponding generator
-                if self.queue_next_workload.qsize() < self.queue_notify_size:
+                # corresponding generator if needed
+                if events['DataGenerators'].is_set() and \
+                            queues['next_workload'].qsize() < notify_size:
                     new_processes.append(self.generate_generator('workload'))
-                if self.queue_workload_data.qsize() < self.queue_notify_size:
+                if events['QueryGenerators'].is_set() and \
+                            queues['workload_data'].qsize() < notify_size:
                     new_processes.append(self.generate_generator('data'))
-                if self.queue_executed_queries.qsize() < self.queue_notify_size:
+                if events['LogGenerators'] and \
+                            queues['executed_queries'].qsize() < notify_size:
                     new_processes.append(self.generate_generator('query'))
 
                 # check if the logger needs more processes
-                if self.queue_executed_queries.qsize() > .9 * self.queue_target_size:
+                if events['LogGenerators2'] or \
+                            queues['executed_queries'].qsize() > target_size:
                     new_processes.append(self.generate_generator('logger'))
 
                 # start all newly generated processes
@@ -162,12 +178,47 @@ class GeneratorCoordinator(object):
                     self.processes.append(proc)
                     proc.start()
 
-                # reset the signal
-                self.needs_supervision.clear()
+                # reset all signals
+                for event in events.values():
+                    event.clear()
 
                 # now wait for a second, but wake up if receiving the
                 # shutdown signal
-                self.events.shutdown.wait(1)
+                events['shutdown'].wait(1)
         # Print the number of generated data items
         print 'max_inserted:', self.max_inserted
-        # TODO: is there more that needs to be done before shutting down?
+        # TODO: what needs to be done before shutting down?
+
+
+# helper functions to provide waiting for multiple events simultaneously,
+# found at https://stackoverflow.com/a/12320352/1065901
+def or_set(self):
+    self._set()
+    self.changed()
+
+
+def or_clear(self):
+    self._clear()
+    self.changed()
+
+
+def orify(e, changed_callback):
+    e._set = e.set
+    e._clear = e.clear
+    e.changed = changed_callback
+    e.set = lambda: or_set(e)
+    e.clear = lambda: or_clear(e)
+
+
+def OrEvent(*events):
+    or_event = Event()
+    def changed():
+        bools = [e.is_set() for e in events]
+        if any(bools):
+            or_event.set()
+        else:
+            or_event.clear()
+    for e in events:
+        orify(e, changed)
+    changed()
+    return or_event

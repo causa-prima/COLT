@@ -12,7 +12,7 @@ class PythonTypes(Random):
     Subclass of random.Random, implementing methods to generate some basic python types. Methods of this class
     have 'sane' default values to support easy data generation.
     """
-
+    # TODO: should the default values be defined here or in some other place?
     def __init__(self, seed=None):
         Random.__init__(self, seed)
         self.methods_switch = dict(

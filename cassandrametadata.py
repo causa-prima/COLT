@@ -39,3 +39,22 @@ class CassandraMetadata(object):
         return '\n'.join(res)
 
 #print CassandraMetadata()
+"""
+this has to be in the config after parsing:
+
+workloads:
+    <name>:
+	ratio: <num>
+	queries: [
+		  keyspace: <str>
+		  table: <str>
+		  prepared_statement: <prepared_statement>
+		  type: 'insert' | 'select' | 'update' | 'delete'		# how to get those? parsing? hopefully not..
+		  chance: <float[0,1]>						# only if type == 'insert'
+		  attributes: [
+			       level: 'primary' | 'partition' | 'attribute'	# other names could be used - should they?
+			       type: <data_type>
+			       generator-args: <dict of args for generator>	# can it be empty?
+			      ]
+		  ]
+"""

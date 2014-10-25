@@ -238,61 +238,6 @@ class DataGenerator(Generator):
         # repack the item and put it into the output queue
         self.queue_out.put((workload, workload_data))
 
-    def generate_items_old(self, keyspace_name, table_name, columns):
-        """ Generate data from item_seed column in item_seed certain row.
-
-        :param string keyspace_name: name of the keyspace containing the table
-        :param string table_name: name of the table within the keyspace
-        :param dict columns: name of the columns with item_seed seed to generate data for
-        :return: data items of type of the column
-        :rtype: dict
-        """
-
-        result = {}
-        config = {}
-        if keyspace_name in self.config:
-            if table_name in self.config[keyspace_name]:
-                config = self.config[keyspace_name][table_name]
-
-        for column_name, item_seed in columns.items():
-            try:
-                column_type = self.metadata.schema[keyspace_name][table_name][column_name]
-            except KeyError:
-                msg = 'Column name "{}" not found in keyspace "{}", table "{}"'.format(
-                                                                                column_name,
-                                                                                keyspace_name,
-                                                                                table_name)
-                raise LookupError(msg)
-
-            # get config arguments for the generator (if they exist)
-            generator_args = {}
-            if column_name in config:
-                generator_args = config[column_name]
-
-            # parse type(s) of collection types
-            if column_type[-1] is '>':
-                # strip the last char from column_type string and split it at <
-                column_type, _, elem_type = column_type[:-1].partition('<')
-
-                # maps have two data types for key and value
-                if column_type[0] is 'm':
-                    key_type, _, elem_type = elem_type.partition(', ')
-                    generator_args['key_type'] = key_type
-
-                generator_args['elem_type'] = elem_type
-
-            # TODO: user-defined types introduced in C* 2.1
-
-            # reseed the generator for each column
-            # TODO: Generate seed in preceding generator
-            item_seed = hash('%s%s' % (column_name, item_seed))
-            self.generator.seed(item_seed)
-
-            # call the generator for the type of the column
-            result[column_name] = self.generator.methods_switch[column_type](**generator_args)
-
-        return result
-
 
 class QueryGenerator(Generator):
 

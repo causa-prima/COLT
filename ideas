@@ -1,5 +1,1 @@
-data generation:
-
-- generate data in batch for each table, using a pre-generated random seed for each table
-- for test data generation use random seed of the table test data needs to be generated for
-	- synchronisation just needed for selection of "offset" from seed (value for seed.jumpahead)
+TODO: make consistency level available for queries (on creation of the prepared statement, see https://datastax.github.io/python-driver/getting_started.html#setting-a-consistency-level-with-prepared-statements)

@@ -305,13 +305,16 @@ class LogGenerator(Generator):
                         self.queue_in.qsize() > self.queue_target_size:
             self.needs_more_processes.set()
 
+        now = int(now)
         # do not log execution times of errors
         if not err:
             with self.logs.lock:
                 try:
-                    self.logs.values[int(now)] += end - start
+                    self.logs.latencies[now] += end - start
+                    self.logs.queries[now] += 1
                 except KeyError:
-                    self.logs.values[int(now)] = end - start
+                    self.logs.latencies[now] = end - start
+                    self.logs.queries[now] = 1
 
         # If a new item was generated, the max_inserted counter needs to be
         # incremented for the WorkloadGenerators to notice this.

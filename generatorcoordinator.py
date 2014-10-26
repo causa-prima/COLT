@@ -1,4 +1,5 @@
 from multiprocessing import Event, Lock, Process, Queue, Value
+from time import time
 
 from bitarray import bitarray
 
@@ -71,7 +72,8 @@ class GeneratorCoordinator(object):
         # Log data of execution times
         self.logs = object()
         self.logs.lock = Lock()
-        self.logs.values = {}
+        self.logs.latencies = {}
+        self.logs.queries = {}
 
         # list of all running processes
         self.processes = []
@@ -85,8 +87,11 @@ class GeneratorCoordinator(object):
         data_generator = self.generate_generator('data')
         query_generator = self.generate_generator('query')
         logger = self.generate_generator('logger')
+        watcher = Process(target=self.watch_and_report())
 
-        self.processes = [wl_generator, data_generator, query_generator, logger]
+        self.processes = [wl_generator, data_generator,
+                          query_generator, logger,
+                          watcher]
         for process in self.processes:
             process.start()
 
@@ -188,6 +193,38 @@ class GeneratorCoordinator(object):
         # Print the number of generated data items
         print 'max_inserted:', self.max_inserted
         # TODO: what needs to be done before shutting down?
+
+    def watch_and_report(self):
+        succ_latencies = [2**64]
+        succ_queries = [0]
+
+        while True:
+            last_second = int(time())-1
+            with self.logs.lock:
+                # print only values of the last second, as the older ones
+                # don't change anymore
+                latency = self.logs.latencies[last_second]
+                queries = self.logs.queries[last_second]
+            msg = 'queries: %10i     avg latency: %10.2f ms'
+            print msg % (queries, latency/queries)
+
+            # check if shutdown conditions are met
+            # and set shutdown signal accordingly
+            if succ_latencies[-1] > latency:
+                succ_latencies = [latency]
+            else:
+                succ_latencies.append(latency)
+
+            if queries > succ_queries[-1]:
+                succ_queries = [queries]
+            else:
+                succ_queries.append(queries)
+            # TODO: determine the right config fields to check
+            if len(succ_latencies) > self.config['abort']['#latencies'] or\
+                        len(succ_queries) > self.config['abort']['#queries']:
+                self.events['shutdown'].set()
+                break
+
 
 
 # helper functions to provide waiting for multiple events simultaneously,

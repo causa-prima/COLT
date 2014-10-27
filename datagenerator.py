@@ -197,14 +197,15 @@ class DataGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
-                 config=None, connection_args_dict={}):
+                 config=None, connection_args_dict={},
+                 generator=None):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
 
-        self.generator = CassandraTypes()
+        self.generator = generator
 
     def process_item(self):
         """ Generates the data for workload from the input queue and

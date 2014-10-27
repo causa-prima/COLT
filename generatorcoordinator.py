@@ -116,7 +116,9 @@ class GeneratorCoordinator(object):
                                  shutdown=self.events['shutdown'],
                                  queue_target_size=self.queue_target_size,
                                  queue_notify_size=self.queue_notify_size,
-                                 config=self.config)
+                                 config=self.config,
+                                 # TODO: add database-specific generator
+                                 generator=None)
         if type == 'query':
             return QueryGenerator(queue_in=self.queues['workload_data'],
                                   queue_out=self.queues['executed_queries'],

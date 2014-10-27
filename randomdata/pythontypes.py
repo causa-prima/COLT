@@ -26,6 +26,7 @@ class PythonTypes(Random):
             float=self.pyfloat,
             decimal=self.pydecimal,
             list=self.pylist,
+            tuple=self.pytuple,
             dict=self.pydict,
             set=self.pyset
         )
@@ -179,14 +180,35 @@ class PythonTypes(Random):
         :param option int max_elems: maximum length of list. default = 10
         :param optional string elem_type: type of elements in list. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of list elements
-        :return: list of length elem_count with items of type elem_type
+        :return: list with length between min_elems and max_elems, containing items of type elem_type
         :rtype: list
         """
         result = []
-        elems = self.randrange(min_elems,max_elems+1)
+        elems = self.randrange(min_elems, max_elems+1)
         for _ in xrange(elems):
             try:
                 result.append(self.methods_switch[elem_type](**elem_args))
+            except KeyError:
+                raise NotImplementedError(
+                    'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
+        return result
+
+    def pytuple(self, min_elems=0, max_elems=10, elem_type='int', **elem_args):
+        """ Generates a tuple of definable random length with items of
+        definable type.
+
+        :param option int min_elems: minimum length of list. default = 0
+        :param option int max_elems: maximum length of list. default = 10
+        :param optional string elem_type: type of elements in list. default = 'int'
+        :param optional dict elem_args: keyword dict of arguments for generation of list elements
+        :return: tupel with length between min_elems and max_elems, containing items of type elem_type
+        :rtype: list
+        """
+        result = ()
+        elems = self.randrange(min_elems, max_elems+1)
+        for _ in xrange(elems):
+            try:
+                result += (self.methods_switch[elem_type](**elem_args),)
             except KeyError:
                 raise NotImplementedError(
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
@@ -203,11 +225,11 @@ class PythonTypes(Random):
         :param optional string key_type: type of dict keys. default = 'int'
         :param optional string elem_type: type of elements in dict. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of dict elements
-        :return: dict of size elem_count with keys of type key_type and items of type elem_type
+        :return: dict with size between min_elems and max_elems, containing keys of type key_type and items of type elem_type
         :rtype: dict
         """
         result = dict()
-        elems = self.randrange(min_elems,max_elems+1)
+        elems = self.randrange(min_elems, max_elems+1)
         # Warning: it is not checked whether enough distinct keys
         # can be generated, thus we could end up in an infinite loop!
         while len(result) < elems:
@@ -229,11 +251,11 @@ class PythonTypes(Random):
         :param optional int max_elems: maximum size of set. default = 10
         :param optional string elem_type: type of elements in set. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of set elements
-        :return: set of size elem_count with items of type elem_type
+        :return: set with size between min_elem and max_elem, containing items of type elem_type
         :rtype: set
         """
         result = set()
-        elems = self.randrange(min_elems,max_elems+1)
+        elems = self.randrange(min_elems, max_elems+1)
         # Warning: it is not checked whether enough distinct elements
         # can be generated, thus we could end up in an infinite loop!
         while len(result) < elems:

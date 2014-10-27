@@ -1,5 +1,5 @@
 from multiprocessing import Event, Lock, Process, Queue, Value
-from time import time
+from time import time, sleep
 
 from bitarray import bitarray
 
@@ -224,6 +224,9 @@ class GeneratorCoordinator(object):
                         len(succ_queries) > self.config['abort']['#queries']:
                 self.events['shutdown'].set()
                 break
+
+            # sleep until the next second
+            sleep(last_second+2.25-time())
 
 
 

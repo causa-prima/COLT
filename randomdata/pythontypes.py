@@ -1,16 +1,16 @@
 from datetime import datetime
 from time import mktime
 from uuid import UUID
-from decimal import Decimal, localcontext
+from decimal import Decimal
 from random import Random
 from string import printable
-from sys import float_info
 
 
 class PythonTypes(Random):
     """
-    Subclass of random.Random, implementing methods to generate some basic python types. Methods of this class
-    have 'sane' default values to support easy data generation.
+    Subclass of random.Random, implementing methods to generate some basic
+    python types. Methods of this class have 'sane' default values to support
+    easy data generation.
     """
     # TODO: should the default values be defined here or in some other place?
     def __init__(self, seed=None):
@@ -52,20 +52,21 @@ class PythonTypes(Random):
                     'Generation of type {} not implemented in {}'.format(type_to_gen, self.__class__.__name__))
 
     def pydate(self, start_date=None, end_date=None, start_timestamp=1388530800, end_timestamp=1420066799):
-        """Generates a random timestamp between two dates given either as datetime or timestamp.
-        If start_date __and__ end_date are defined, timestamps will be ignored.
+        """Generates a random timestamp between two dates given either as
+        datetime or timestamp. If start_date __and__ end_date are defined,
+        timestamps will be ignored.
 
         :param optional datetime start_date: start date of time period. default = None
         :param optional datetime end_date: end date of time period. default = None
-        :param optional int start_timestamp: start date of time period. default = 1388530800 (2014-01-01 00:00:00)
-        :param optional int end_timestamp: end date of time period. default = 1420066799 (2014-12-31 23:59:59)
+        :param optional float start_timestamp: start date of time period. default = 1388530800 (2014-01-01 00:00:00)
+        :param optional float end_timestamp: end date of time period. default = 1420066799 (2014-12-31 23:59:59)
         :return: random date between start and end
         :rtype: datetime
         """
         if (start_date is not None) & (end_date is not None):
-            start_timestamp = int(mktime(start_date.timetuple()))
-            end_timestamp = int(mktime(end_date.timetuple()))
-        return datetime.fromtimestamp(self.randrange(start_timestamp, end_timestamp+1))
+            start_timestamp = mktime(start_date.timetuple())
+            end_timestamp = mktime(end_date.timetuple())
+        return datetime.fromtimestamp(self.uniform(start_timestamp, end_timestamp))
 
     def pyuuid(self, timestamp=None):
         """Generates a random UUID.
@@ -75,7 +76,8 @@ class PythonTypes(Random):
         :rtype: uuid
         """
 
-        # code taken & adapted from standard python uuid library (/usr/lib/python2.7/uuid.py)
+        # code taken & adapted from standard python uuid library
+        # (/usr/lib/python2.7/uuid.py)
         if timestamp is not None:
             nanoseconds = int(timestamp * 1e9)
         else:
@@ -169,16 +171,19 @@ class PythonTypes(Random):
         # wanted number of decimal places.
         return Decimal('%.*f' % (decimal_places, self.uniform(low, high)))
 
-    def pylist(self, elems=10, elem_type='int', **elem_args):
-        """ Generates a list of definable length with items of definable type.
+    def pylist(self, min_elems=0, max_elems=10, elem_type='int', **elem_args):
+        """ Generates a list of definable random length with items of definable
+        type.
 
-        :param option int elems: length of list. default = 10
+        :param option int min_elems: minimum length of list. default = 0
+        :param option int max_elems: maximum length of list. default = 10
         :param optional string elem_type: type of elements in list. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of list elements
         :return: list of length elem_count with items of type elem_type
         :rtype: list
         """
         result = []
+        elems = self.randrange(min_elems,max_elems+1)
         for _ in xrange(elems):
             try:
                 result.append(self.methods_switch[elem_type](**elem_args))
@@ -187,10 +192,14 @@ class PythonTypes(Random):
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
         return result
 
-    def pydict(self, elems=10, key_type='int', elem_type='int', **elem_args):
-        """ Generates a dict of definable size with keys and items of definable type.
+    def pydict(self, min_elems=0, max_elems=10, key_type='int', elem_type='int', **elem_args):
+        """ Generates a dict of definable random size with keys and items of
+        definable type.
+        Warning: it is not checked whether enough distinct keys can be
+        generated, thus this method could end up in an infinite loop!
 
-        :param optional int elems: size of dict. default = 10
+        :param optional int min_elems: minimal size of dict. default = 0
+        :param optional int max_elems: maximal size of dict. default = 10
         :param optional string key_type: type of dict keys. default = 'int'
         :param optional string elem_type: type of elements in dict. default = 'int'
         :param optional dict elem_args: keyword dict of arguments for generation of dict elements
@@ -198,6 +207,7 @@ class PythonTypes(Random):
         :rtype: dict
         """
         result = dict()
+        elems = self.randrange(min_elems,max_elems+1)
         # Warning: it is not checked whether enough distinct keys
         # can be generated, thus we could end up in an infinite loop!
         while len(result) < elems:
@@ -209,16 +219,21 @@ class PythonTypes(Random):
                     'Generation of type {} not implemented in {}'.format(type, self.__class__.__name__))
         return result
 
-    def pyset(self, elems=10, elem_type='int', **elem_args):
-        """ Generates a set of definable size with items of definable type.
+    def pyset(self, min_elems=0, max_elems=10, elem_type='int', **elem_args):
+        """ Generates a set of definable random size with items of definable
+        type.
+        Warning: it is not checked whether enough distinct elements can be
+        generated, thus this method could end up in an infinite loop!
 
-        :param elems: size of set. default = 10
-        :param elem_type: type of elements in set. default = 'int'
-        :param elem_args: keyword dict of arguments for generation of set elements
+        :param optional int min_elems: minimum size of set. default = 0
+        :param optional int max_elems: maximum size of set. default = 10
+        :param optional string elem_type: type of elements in set. default = 'int'
+        :param optional dict elem_args: keyword dict of arguments for generation of set elements
         :return: set of size elem_count with items of type elem_type
         :rtype: set
         """
         result = set()
+        elems = self.randrange(min_elems,max_elems+1)
         # Warning: it is not checked whether enough distinct elements
         # can be generated, thus we could end up in an infinite loop!
         while len(result) < elems:

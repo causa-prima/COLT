@@ -2,8 +2,6 @@ from multiprocessing import Process
 from time import time
 from datetime import datetime
 
-from randomdata.cassandratypes import CassandraTypes
-
 
 class Generator(Process):
     """Prototype for all generators. It has queues for data in- and
@@ -63,7 +61,8 @@ class WorkloadGenerator(Generator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
-                 config=None, key_structs=None, max_inserted=None):
+                 config=None, key_structs=None, max_inserted=None,
+                 generator=None):
         Generator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
@@ -72,7 +71,7 @@ class WorkloadGenerator(Generator):
 
         self.key_structs = key_structs
         self.max_inserted = max_inserted
-        self.generator = CassandraTypes()
+        self.generator = generator
 
         # aggregate the chances and map the chances
         # of each workload into [0,ratio_sum]

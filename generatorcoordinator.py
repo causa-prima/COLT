@@ -108,7 +108,9 @@ class GeneratorCoordinator(object):
                                      queue_target_size=self.queue_target_size,
                                      queue_notify_size=self.queue_notify_size,
                                      config=self.config,
-                                     key_structs=self.key_structs)
+                                     key_structs=self.key_structs,
+                                     # TODO: add database-specific generator
+                                     generator=None)
         if type == 'data':
             return DataGenerator(queue_in=self.queues['next_workload'],
                                  queue_out=self.queues['workload_data'],

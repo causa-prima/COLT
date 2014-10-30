@@ -1,4 +1,4 @@
-keyspaces:
+schemata:
   # Testkommentar
   keyspace_name_1:
     definition: keyspace_definition_1
@@ -6,8 +6,7 @@ keyspaces:
       table_name_1:
         definition: table_definition_1
         distributions:
-          column_name1:
-            size:
+          column_name1: <generator_args>
       table_name_2:
         definition: table_definition_2
   keyspace_name_2:
@@ -32,3 +31,13 @@ workloads:
   workload_name_3:
     queries: *id001
     ratio: 30
+
+config:
+  delete old: False
+  termination conditions:
+    latency:
+      max: 1000 # Value in ms
+      consecutive: 5
+    queries:
+      max: 10000 # bonus parameter
+      consecutive: 5

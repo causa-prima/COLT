@@ -6,6 +6,9 @@ from connectioninterface import ConnectionInterface
 
 
 class CassandraConnection(ConnectionInterface):
+    cluster = None
+    session = None
+    execute_unprepared_stmt = None
 
     def connect(self, **kwargs):
         """ Create connection to cassandra cluster.
@@ -14,6 +17,9 @@ class CassandraConnection(ConnectionInterface):
         """
         self.cluster = Cluster(**kwargs)
         self.session = self.cluster.connect()
+
+        # method to execute unprepared statements
+        self.execute_unprepared_stmt = self.session.execute_async
 
     def shutdown(self):
         """ Terminate connection to cassandra cluster.

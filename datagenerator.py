@@ -57,7 +57,7 @@ class Generator(Process):
 
 
 class WorkloadGenerator(Generator):
-
+    # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
@@ -192,7 +192,7 @@ class WorkloadGenerator(Generator):
 
 
 class DataGenerator(Generator):
-
+    # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
@@ -240,7 +240,7 @@ class DataGenerator(Generator):
 
 
 class QueryGenerator(Generator):
-
+    # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
@@ -277,7 +277,7 @@ class QueryGenerator(Generator):
 
 
 class LogGenerator(Generator):
-
+    # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,

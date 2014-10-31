@@ -3,7 +3,7 @@ from time import time
 from datetime import datetime
 
 
-class Generator(Process):
+class BaseGenerator(Process):
     """Prototype for all generators. It has queues for data in- and
     output, events to notify a need for supervision and to signal a
     wanted shutdown, and parameters for the queue target size and the
@@ -29,10 +29,12 @@ class Generator(Process):
         self.shutdown = shutdown
 
         # configuration
+        # TODO: pass only needed information
         self.config = config
 
 
     def run(self):
+    # TODO: docstring
         while True:
             # Check whether there is already enough data in the
             # output queue, and wait while there is.
@@ -55,15 +57,20 @@ class Generator(Process):
             # there is something to do, so let's go!
             self.process_item()
 
+    def process_item(self):
+    # TODO: docstring
+        raise NotImplementedError
 
-class WorkloadGenerator(Generator):
+
+class WorkloadGenerator(BaseGenerator):
     # TODO: DocString
+    # TODO: the WorkloadGenerator is too Cassandra-specific, either solve that or put it into a own module
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
                  config=None, key_structs=None, max_inserted=None,
                  generator=None):
-        Generator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -93,11 +100,10 @@ class WorkloadGenerator(Generator):
 
         queries = []
         for query in workload['queries']:
-            q = []
+            query_data = []
             # we need the bitmap of seeds that were used as primary keys
-            keyspace = query['keyspace']
             table = query['table']
-            key_struct = self.key_structs[keyspace][table]
+            key_struct = self.key_structs[table]
             # check if a new data item might be generated
             if query['type'] == 'insert':
                 # lock the bitmap for the table the item will be stored in
@@ -143,8 +149,8 @@ class WorkloadGenerator(Generator):
                 # Note that this number does not necessarily represent the seed
                 # that was used to generate the new item. For further
                 # information check the LogGenerator's process_item method.
-                with self.max_inserted.get_lock():
-                    partition_seed = self.max_inserted.value
+                with self.max_inserted[table].get_lock():
+                    partition_seed = self.max_inserted[table].value
 
                 partition_seed = self.generator.randrange(0, partition_seed)
                 cluster_seed = partition_seed
@@ -180,25 +186,25 @@ class WorkloadGenerator(Generator):
                 else:
                     seed = cluster_seed
                 data = (attribute['type'], seed, attribute['generator_args'])
-                # append an object with a marker for new objects and the data
-                # to the list of queries
-                q.append((query['type'] == 'insert', data))
-            # append the data for this query to the
-            # list of queries for that workload
-            queries.append(q)
+                # append the attribute data to the list of attributes for that
+                # query
+                query_data.append(data)
+            # append a marker for new objects and the data for this query to
+            # the list of queries for that workload
+            queries.append((query['type'] == 'insert', query_data))
 
         # put the workload with its data into the queue
         self.queue_out.put((workload, queries))
 
 
-class DataGenerator(Generator):
+class DataGenerator(BaseGenerator):
     # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
                  config=None, connection_args_dict={},
                  generator=None):
-        Generator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -219,9 +225,9 @@ class DataGenerator(Generator):
         # than once. Each column instance could be needed with
         # different configurations.
         workload_data = []
-        for query in queries:
-            values = []
-            for new, (type, seed, generator_args) in query:
+        for new, query in queries:
+            query_values = []
+            for type, seed, generator_args in query:
 
                 # reseed the generator to generate the wanted item
                 self.generator.seed(seed)
@@ -230,23 +236,23 @@ class DataGenerator(Generator):
                 except KeyError:
                     msg = "generator for type %s not implemented!" % type
                     raise NotImplementedError(msg)
-                values.append(val)
+                query_values.append(val)
 
-            # replace the original list of configurations with the result list
-            workload_data.append((new, values))
+            # append the data for that query to the workload data
+            workload_data.append((new, query_values))
 
         # repack the item and put it into the output queue
         self.queue_out.put((workload, workload_data))
 
 
-class QueryGenerator(Generator):
+class QueryGenerator(BaseGenerator):
     # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
                  config=None, connection=None):
 
-        Generator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -276,7 +282,7 @@ class QueryGenerator(Generator):
             query_num += 1
 
 
-class LogGenerator(Generator):
+class LogGenerator(BaseGenerator):
     # TODO: DocString
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
@@ -284,7 +290,7 @@ class LogGenerator(Generator):
                  config=None, max_inserted=None, logs=None,
                  queue_max_time=None, needs_more_processes=None):
 
-        Generator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -330,8 +336,9 @@ class LogGenerator(Generator):
             if err:
                 msg = 'New item should have been inserted, but an error occured.'
                 raise Warning(msg)
-            with self.max_inserted.get_lock():
-                self.max_inserted.value += 1
+            table = workload['queries'][query_num]['table']
+            with self.max_inserted[table].get_lock():
+                self.max_inserted[table].value += 1
 
 
 

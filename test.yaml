@@ -20,20 +20,20 @@ schemata:
 workloads:
   workload_name_1:
     queries: &id001
-      - querie_1
+      - querie: querie_1
       # Testkommentar
-      - querie_2
+      - querie: querie_2
     ratio: 20
   workload_name_2:
     queries:
-      - querie_3
+      - querie: querie_3
+        chance: .5              # needed if query type is 'insert'
     ratio: 50
   workload_name_3:
     queries: *id001
     ratio: 30
 
 config:
-  delete old: False
   termination conditions:
     latency:
       max: 1000 # Value in ms

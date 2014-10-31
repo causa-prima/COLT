@@ -9,15 +9,22 @@ from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogG
 class GeneratorCoordinator(object):
 
     def __init__(self, config, queue_target_size=100000, max_processes=50):
-        # The GeneratorCoordinator spawns multiple processes for data
-        # and query generation. Generators communicate via queues,
-        # each generator shares a queue for input and/or output with
-        # other generators. In case the input queue gets to small
-        # each generator can emit a signal to the coordinator, which
-        # then (under certain conditions) spawns a new process to
-        # fill that queue.
-        # Workload generators are supposed to "report" the generation
-        # of new data via incrementing the max_generated_seed.
+        """ The GeneratorCoordinator spawns multiple processes for data
+        and query generation. Generators communicate via queues,
+        each generator shares a queue for input and/or output with
+        other generators ot the same type. In case the input queue gets to
+        small each generator can emit a signal to the coordinator, which
+        then (under certain conditions) spawns a new process filling that queue.
+        Workload generators are supposed to "report" the generation
+        of new data via adding information to the seed bitmap vector, new data
+        items written to the database should increment the max_generated
+        structure.
+
+        :param config:
+        :param queue_target_size:
+        :param max_processes:
+        :return:
+        """
 
         # The number of generated data items within each table.
         # If there was already data generated with by same rules one
@@ -27,25 +34,17 @@ class GeneratorCoordinator(object):
         # Because of the separation of data generation and querying
         # two dicts are needed to handle both processes separately.
         self.key_structs = {}
-        for keyspace in config['keyspaces'].keys():
-            self.key_structs[keyspace] = {}
-            for table in config['keyspaces'][keyspace].keys():
-                key_struct = object()
-                key_struct.lock = Lock()
-                key_struct.bitmap = bitarray()
-                self.key_structs[keyspace][table] = key_struct
-                # TODO: import old key bitmap - or regenerate?
-
-        # TODO: numbers here can be incorrect on runtime
+        # The number of generated data items per table written to the database
+        # TODO: numbers can be incorrect on runtime
         # See LogGenerator's process_item for further information.
         self.max_inserted = {}
-        for keyspace in config['keyspaces'].keys():
-            self.max_inserted[keyspace] = {}
-            for table in config['keyspaces'][keyspace].keys():
-                try:
-                    self.max_inserted[keyspace][table] = Value('L', config['keyspaces'][keyspace][table]['max_inserted'])
-                except KeyError:
-                    self.max_inserted[keyspace][table] = Value('L', 0)
+        for table in config['tables'].keys():
+            key_struct = object()
+            key_struct.lock = Lock()
+            key_struct.bitmap = bitarray()
+            self.key_structs[table] = key_struct
+            self.max_inserted[table] = Value('L', 0)
+            # TODO: import old data: import key bitmap or regenerate?
 
         # target sizes of queues
         self.queue_target_size = queue_target_size
@@ -199,6 +198,7 @@ class GeneratorCoordinator(object):
         # TODO: what needs to be done before shutting down?
 
     def watch_and_report(self):
+        # TODO: check for arbitrary termination conditions?
         succ_latencies = [2**64]
         succ_queries = [0]
 
@@ -227,6 +227,7 @@ class GeneratorCoordinator(object):
             if len(succ_latencies) > self.config['abort']['#latencies'] or\
                         len(succ_queries) > self.config['abort']['#queries']:
                 self.events['shutdown'].set()
+                # TODO: report the termination to the user
                 break
 
             # sleep until the next second

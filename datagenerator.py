@@ -185,7 +185,7 @@ class WorkloadGenerator(BaseGenerator):
                     seed = partition_seed
                 else:
                     seed = cluster_seed
-                data = (attribute['type'], seed, attribute['generator_args'])
+                data = (attribute['type'], seed, attribute['generator args'])
                 # append the attribute data to the list of attributes for that
                 # query
                 query_data.append(data)

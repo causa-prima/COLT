@@ -8,7 +8,9 @@ from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogG
 
 class GeneratorCoordinator(object):
 
-    def __init__(self, config, queue_target_size=100000, max_processes=50):
+    def __init__(self, config, random_class, connection_class,
+                 queue_target_size=100000, max_processes=50):
+        # TODO: complete docstring
         """ The GeneratorCoordinator spawns multiple processes for data
         and query generation. Generators communicate via queues,
         each generator shares a queue for input and/or output with
@@ -23,6 +25,8 @@ class GeneratorCoordinator(object):
         :param config:
         :param queue_target_size:
         :param max_processes:
+        :param random_class:
+        :param connection_class:
         :return:
         """
 
@@ -39,7 +43,9 @@ class GeneratorCoordinator(object):
         # See LogGenerator's process_item for further information.
         self.max_inserted = {}
         for table in config['tables'].keys():
-            key_struct = object()
+            # hacky way to construct an object to
+            # which attributes can be assigned
+            key_struct = type('', (object,), {})
             key_struct.lock = Lock()
             key_struct.bitmap = bitarray()
             self.key_structs[table] = key_struct
@@ -66,10 +72,10 @@ class GeneratorCoordinator(object):
         # Event to tell all child processes to shut down
 
         # convenience event to wait for all events simultaneously
-        self.supervision_needed = OrEvent(self.events.values())
+        self.supervision_needed = OrEvent(*self.events.values())
 
         # Log data of execution times
-        self.logs = object()
+        self.logs = type('', (object,), {})
         self.logs.lock = Lock()
         self.logs.latencies = {}
         self.logs.queries = {}
@@ -78,6 +84,10 @@ class GeneratorCoordinator(object):
         self.processes = []
         # maximum number of processes
         self.max_processes = max_processes
+
+        self.random_class = random_class
+        self.connection_class = connection_class
+        self.connection = connection_class()
 
         self.config = config
 
@@ -108,8 +118,7 @@ class GeneratorCoordinator(object):
                                      queue_notify_size=self.queue_notify_size,
                                      config=self.config,
                                      key_structs=self.key_structs,
-                                     # TODO: add database-specific generator
-                                     generator=None)
+                                     generator=self.random_class())
         if type == 'data':
             return DataGenerator(queue_in=self.queues['next_workload'],
                                  queue_out=self.queues['workload_data'],
@@ -118,8 +127,7 @@ class GeneratorCoordinator(object):
                                  queue_target_size=self.queue_target_size,
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config,
-                                 # TODO: add database-specific generator
-                                 generator=None)
+                                 generator=self.random_class())
         if type == 'query':
             return QueryGenerator(queue_in=self.queues['workload_data'],
                                   queue_out=self.queues['executed_queries'],
@@ -127,7 +135,8 @@ class GeneratorCoordinator(object):
                                   shutdown=self.events['shutdown'],
                                   queue_target_size=self.queue_target_size,
                                   queue_notify_size=self.queue_notify_size,
-                                  config=self.config) # TODO: hand over a connection object
+                                  config=self.config,
+                                  connection=self.connection)
         if type == 'logger':
             return LogGenerator(queue_in=self.queues['executed_queries'],
                                 needs_more_input=self.events['LogGenerators'],
@@ -199,8 +208,14 @@ class GeneratorCoordinator(object):
 
     def watch_and_report(self):
         # TODO: check for arbitrary termination conditions?
-        succ_latencies = [2**64]
-        succ_queries = [0]
+        term_conds = self.config['config']['termination conditions']
+        max_latency = term_conds['latency']['max']
+        consec_latencies = term_conds['latency']['consecutive']
+        max_queries = term_conds['queries']['max']
+        consec_queries = term_conds['queries']['consecutive']
+        succ_latencies = 0
+        succ_queries = 0
+        last_num_queries = 0
 
         while True:
             last_second = int(time())-1
@@ -209,25 +224,44 @@ class GeneratorCoordinator(object):
                 # don't change anymore
                 latency = self.logs.latencies[last_second]
                 queries = self.logs.queries[last_second]
-            msg = 'queries: %10i     avg latency: %10.2f ms'
+            msg = 'queries/sec: %10i     avg latency: %10.2f ms'
             print msg % (queries, latency/queries)
+
+            # if the latency exceeds the defined threshold, increment the value
+            # of successive latencies over the threshold
+            if latency > max_latency:
+                succ_latencies += 1
+            else:
+                # reset the counter if the latency was below the threshold
+                succ_latencies = 0
+
+            # if the number of executed queries falls below the number of the
+            # last second increment the value of successive decreasing #queries
+            if queries < last_num_queries:
+                succ_queries += 1
+            else:
+                # reset the counter if the #queries was bigger than last second
+                succ_queries = 0
 
             # check if shutdown conditions are met
             # and set shutdown signal accordingly
-            if succ_latencies[-1] > latency:
-                succ_latencies = [latency]
-            else:
-                succ_latencies.append(latency)
+            latencies = succ_latencies > consec_latencies
+            num_queries = succ_queries > consec_queries
+            msgs = []
+            if latencies:
+                msg = 'Latency was over %s ms for %s consecutive seconds'
+                msgs.append(msg % (max_latency, consec_latencies))
+            if num_queries:
+                msg = 'Number of queries has fallen %s consecutive seconds'
+                msgs.append(msg % consec_queries)
+            if queries > max_queries:
+                msg = 'Number of queries per second has risen over %s'
+                msgs.append(msg % max_queries)
 
-            if queries > succ_queries[-1]:
-                succ_queries = [queries]
-            else:
-                succ_queries.append(queries)
-            # TODO: determine the right config fields to check
-            if len(succ_latencies) > self.config['abort']['#latencies'] or\
-                        len(succ_queries) > self.config['abort']['#queries']:
+            if latencies or num_queries or queries > max_queries:
+                msgs.append('Shutting down.')
+                print '\n'.join(msgs)
                 self.events['shutdown'].set()
-                # TODO: report the termination to the user
                 break
 
             # sleep until the next second

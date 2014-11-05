@@ -5,19 +5,16 @@ from connection.cassandraconnection import CassandraConnection
 class CassandraConfig(ConfigInterface):
 
     def __init__(self, config_loc=None, connection=None):
-        # get the schemata before construction the ConfigInterface, because it
-        # automatically calls process_config, which needs the schemata
+
+        self.connection = connection
         self.schemata = {}
-        self.get_schemata()
-
-        self.connection_t = CassandraConnection()
-
-        ConfigInterface.__init__(self, config_loc=config_loc,
-                                 connection=connection)
 
         # string used to join arguments if needed, e.g. keyspace and table
         # name
         self.join_string = '@'
+
+        ConfigInterface.__init__(self, config_loc=config_loc,
+                                 connection=connection)
 
     def get_schemata(self):
         """ Receives schemata from cassandra and adds it to self.schema in a
@@ -42,31 +39,22 @@ class CassandraConfig(ConfigInterface):
                 for cl_key in table_metadata.clustering_key:
                     self.schemata[ks_name][table_name]['clustering key'].append(cl_key.name)
 
-        for ks_name, val in keyspaces.items():
-            for t_name, meta in val.tables.items():
-                print '  ' * 1, 'table name: ', t_name
-                print '  ' * 2, 'partition keys:'
-                for part_key in meta.partition_key:
-                    print '  ' * 3, part_key.name
-                print '  ' * 2, 'clustering keys:'
-                for cl_key in meta.clustering_key:
-                    print '  ' * 3, cl_key.name
-
     def process_config(self):
+        self.config['tables'] = {}
         # TODO: add option to choose if database should be reinitialized, discarding all present data
         self.delete_old_schema()
         self.initialize_schema()
         self.get_schemata()
 
         # add the needed metadata to the workloads-section
-        # TODO: add the needed metadata to the workloads-section
-        for workload in self.config['workloads']:
+        for workload in self.config['workloads'].values():
             for query in workload['queries']:
-                query = {}
+                # TODO: remove following line?
+                # query = {}
                 # Prepare the query, which also gets most needed metadata.
                 # Notice that internal data of the prepared query is used,
                 # which could change in future versions of the driver.
-                prep_stmt = self.connection_t.prepare(query['query'])
+                prep_stmt = self.connection.prepare(query['query'])
                 query['prepared_statement'] = prep_stmt
                 # insert, delete, update and select all have 6 characters, and
                 # as they have to be the first word in the query it is easy
@@ -98,20 +86,23 @@ class CassandraConfig(ConfigInterface):
                     except KeyError:
                         attribute_info['generator args'] = {}
                     attributes.append(attribute_info)
-                query['attributes'] = attributes
 
-                # combine the keyspace and table name to get unique table names
-                query['table'] = self.join_string.join([ks, table])
+                    # combine keyspace and table name to get unique table names
+                    query['table'] = self.join_string.join([ks, table])
+
+                query['attributes'] = attributes
 
 
 
     def delete_old_schema(self):
+        drop_msg =  'dropping keyspace %s'
         statement = 'DROP KEYSPACE IF EXISTS %s'
-        for ks_name in self.config.schemate.keys():
-            self.connection_t.execute_unprepared_stmt(statement % ks_name)
+        for ks_name in self.config['schemata'].keys():
+            print drop_msg % ks_name
+            self.connection.execute_unprepared_stmt(statement % ks_name)
 
     def initialize_schema(self):
-        for ks_name, ks_data in self.config.schemate.items():
+        for ks_name, ks_data in self.config['schemata'].items():
             self.create_keyspace(ks_name, ks_data)
 
     def create_keyspace(self, ks_name, ks_data):
@@ -120,8 +111,10 @@ class CassandraConfig(ConfigInterface):
 
         :param dict ks_data: self.conf['schemata'][keyspace_name] where the keyspace to create is defined
         """
-        self.connection_t.execute_unprepared_stmt(ks_data['definition'])
+        print 'creating keyspace %s with definition "%s"' % (ks_name,ks_data['definition'])
+        self.connection.execute_unprepared_stmt(ks_data['definition'])
         for table_name, table_data in ks_data['tables'].items():
+            print 'creating table %s with definition "%s"' % (table_name, table_data['definition'])
             self.create_table(table_data)
             # combine the keyspace and table name to get unique table names
             combined_name = self.join_string.join([ks_name, table_name])
@@ -133,7 +126,7 @@ class CassandraConfig(ConfigInterface):
 
         :param dict table_data: self.conf['schemata'][keyspace_name]['tables'][tablename] where the table to create is defined
         """
-        self.connection_t.execute_unprepared_stmt(table_data['definition'])
+        self.connection.execute_unprepared_stmt(table_data['definition'])
 
 """
 this has to be in the config after parsing:

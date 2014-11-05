@@ -20,7 +20,7 @@ class CassandraConnection(ConnectionInterface):
         self.session = self.cluster.connect()
 
         # method to execute unprepared statements
-        self.execute_unprepared_stmt = self.session.execute_async
+        self.execute_unprepared_stmt = self.session.execute
         # method to prepare statements
         self.prepare = self.session.prepare
 

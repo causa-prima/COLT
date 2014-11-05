@@ -101,6 +101,10 @@ class WorkloadGenerator(BaseGenerator):
         queries = []
         for query in workload['queries']:
             query_data = []
+            # queries without attributes don't need seeds
+            if query['attributes'] == 0:
+                queries.append((False, query_data))
+                continue
             # we need the bitmap of seeds that were used as primary keys
             table = query['table']
             key_struct = self.key_structs[table]
@@ -343,7 +347,7 @@ class LogGenerator(BaseGenerator):
 
 
 
-test = DataGenerator()
+#test = DataGenerator()
 
 """
 def testprogramm():
@@ -366,6 +370,8 @@ with PyCallGraph(output=GraphvizOutput(output_file='/home/causa-prima/callgraph.
         pass
 '''
 """
+
+'''
 numbers = set([0, 18706, 54552, 77609, 86727, 32664, 80992, 24563, 91197, 39624, 34807])
 
 for i in range(100000):
@@ -374,3 +380,4 @@ for i in range(100000):
         print i, res
 for number in sorted(numbers):
     print number, test.generate_items('test','test',{'name':number,'address':number,'uid':number, 'lval':number})
+'''

@@ -1,0 +1,43 @@
+schemata:
+  # Testkommentar
+  keyspace_name_1:
+    definition: keyspace_definition_1
+    tables:
+      table_name_1:
+        definition: table_definition_1
+        distributions:
+          column_name1: <generator_args>
+      table_name_2:
+        definition: table_definition_2
+  keyspace_name_2:
+    definition: keyspace_definition_2
+    tables:
+      table_name_1: 
+        definition: table_definition_1
+      table_name_2:
+        definition: table_definition_2
+
+workloads:
+  workload_name_1:
+    queries: &id001
+      - query: query_1
+      # Testkommentar
+      - query: query_2
+    ratio: 20
+  workload_name_2:
+    queries:
+      - query: query_3
+        chance: .5              # needed if query type is 'insert'
+    ratio: 50
+  workload_name_3:
+    queries: *id001
+    ratio: 30
+
+config:
+  termination conditions:
+    latency:
+      max: 1000 # Value in ms
+      consecutive: 5
+    queries:
+      max: 10000 # bonus parameter
+      consecutive: 5

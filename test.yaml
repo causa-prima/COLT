@@ -1,43 +1,24 @@
 schemata:
   # Testkommentar
-  keyspace_name_1:
-    definition: keyspace_definition_1
+  first_test:
+    definition: CREATE KEYSPACE first_test WITH REPLICATION = {'class':'SimpleStrategy', 'replication_factor':3}
     tables:
-      table_name_1:
-        definition: table_definition_1
-        distributions:
-          column_name1: <generator_args>
-      table_name_2:
-        definition: table_definition_2
-  keyspace_name_2:
-    definition: keyspace_definition_2
-    tables:
-      table_name_1: 
-        definition: table_definition_1
-      table_name_2:
-        definition: table_definition_2
+      test1:
+        definition: CREATE TABLE IF NOT EXISTS first_test.test1 (name TEXT, PRIMARY KEY(name))
 
 workloads:
-  workload_name_1:
-    queries: &id001
-      - querie: querie_1
-      # Testkommentar
-      - querie: querie_2
-    ratio: 20
-  workload_name_2:
+  fts:
     queries:
-      - querie: querie_3
-        chance: .5              # needed if query type is 'insert'
-    ratio: 50
-  workload_name_3:
-    queries: *id001
-    ratio: 30
+      - query: SELECT * FROm first_test.test1
+      # Testkommentar
+      #- query: query_2
+    ratio: 20
 
 config:
   termination conditions:
     latency:
-      max: 1000 # Value in ms
+      max: 100 # Value in ms
       consecutive: 5
     queries:
-      max: 10000 # bonus parameter
+      max: 10 # bonus parameter
       consecutive: 5

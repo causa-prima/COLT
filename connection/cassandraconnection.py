@@ -11,6 +11,9 @@ class CassandraConnection(ConnectionInterface):
     execute_unprepared_stmt = None
     prepare = None
 
+    def __init__(self, **kwargs):
+        ConnectionInterface.__init__(self, **kwargs)
+
     def connect(self, **kwargs):
         """ Create connection to cassandra cluster.
 
@@ -38,10 +41,16 @@ class CassandraConnection(ConnectionInterface):
         :param multiprocessing.Queue queue_out: the queue in which to put the results
         :param tuple metadata: metadata needed for logging. default = None
         """
-
+        print 'metadata:', self.cluster.metadata
         # we need to wrap the queue.put() function to handle both callbacks
         # (see there for further explanation)
-        fn = lambda err, start, mdata: queue_out.put((err, start, datetime.now(), mdata))
+        def success(response, start, mdata):
+            print 'CassandraConnection success: ', None, start, datetime.now(), mdata
+            queue_out.put((response, start, datetime.now(), mdata))
+        def failure(response, start, mdata):
+            print 'CassandraConnection failure: ', response, start, datetime.now(), mdata
+            print response.__dict__
+            queue_out.put((response, start, datetime.now(), mdata))
         # execute query asynchronously, returning a ResponseFuture-object
         # to which callbacks can be added
         future = self.session.execute_async(statement, parameters)
@@ -50,8 +59,12 @@ class CassandraConnection(ConnectionInterface):
         # first positional parameter, the normal callback just calls it with
         # the given parameters. To handle both cases the wrapper function fn is
         # used, which gets 'None' as first parameter in the non-error-case.
-        future.add_callbacks(callback=fn, callback_args=(
-                            None, datetime.now(), metadata),
-                            errback=fn, errback_args=(
+        future.add_callbacks(callback=success, callback_args=(
+                            datetime.now(), metadata),
+                            errback=failure, errback_args=(
                             (datetime.now(), metadata))
                             )
+
+    def fn(self, err, start, mdata, queue):
+        print 'CassandraConnection: ', err, start, datetime.now(), mdata
+        queue.put((err, start, datetime.now(), mdata))

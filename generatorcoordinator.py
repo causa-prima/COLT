@@ -1,5 +1,6 @@
 from multiprocessing import Event, Lock, Process, Queue, Value
 from time import time, sleep
+from datetime import datetime
 
 from bitarray import bitarray
 
@@ -96,8 +97,7 @@ class GeneratorCoordinator(object):
         data_generator = self.generate_generator('data')
         query_generator = self.generate_generator('query')
         logger = self.generate_generator('logger')
-        watcher = Process(target=self.watch_and_report())
-
+        watcher = Process(target=self.watch_and_report)
         self.processes = [wl_generator, data_generator,
                           query_generator, logger,
                           watcher]
@@ -110,8 +110,8 @@ class GeneratorCoordinator(object):
 
         self.supervise()
 
-    def generate_generator(self, type):
-        if type == 'workload':
+    def generate_generator(self, generator_type):
+        if generator_type == 'workload':
             return WorkloadGenerator(queue_out=self.queues['next_workload'],
                                      shutdown=self.events['shutdown'],
                                      queue_target_size=self.queue_target_size,
@@ -119,7 +119,7 @@ class GeneratorCoordinator(object):
                                      config=self.config,
                                      key_structs=self.key_structs,
                                      generator=self.random_class())
-        if type == 'data':
+        if generator_type == 'data':
             return DataGenerator(queue_in=self.queues['next_workload'],
                                  queue_out=self.queues['workload_data'],
                                  needs_more_input=self.events['DataGenerators'],
@@ -128,7 +128,7 @@ class GeneratorCoordinator(object):
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config,
                                  generator=self.random_class())
-        if type == 'query':
+        if generator_type == 'query':
             return QueryGenerator(queue_in=self.queues['workload_data'],
                                   queue_out=self.queues['executed_queries'],
                                   needs_more_input=self.events['QueryGenerators'],
@@ -136,8 +136,8 @@ class GeneratorCoordinator(object):
                                   queue_target_size=self.queue_target_size,
                                   queue_notify_size=self.queue_notify_size,
                                   config=self.config,
-                                  connection=self.connection)
-        if type == 'logger':
+                                  connection=self.connection_class())
+        if generator_type == 'logger':
             return LogGenerator(queue_in=self.queues['executed_queries'],
                                 needs_more_input=self.events['LogGenerators'],
                                 shutdown=self.events['shutdown'],
@@ -219,13 +219,20 @@ class GeneratorCoordinator(object):
 
         while True:
             last_second = int(time())-1
-            with self.logs.lock:
-                # print only values of the last second, as the older ones
-                # don't change anymore
-                latency = self.logs.latencies[last_second]
-                queries = self.logs.queries[last_second]
+            timepoint = datetime.fromtimestamp(last_second)
+            try:
+                with self.logs.lock:
+                    # print only values of the last second, as the older ones
+                    # don't change anymore
+                    latency = self.logs.latencies[last_second]
+                    queries = self.logs.queries[last_second]
+            except KeyError:
+                print timepoint, 'No data'
+                # sleep until the next second, then continue
+                sleep(last_second+2.25-time())
+                continue
             msg = 'queries/sec: %10i     avg latency: %10.2f ms'
-            print msg % (queries, latency/queries)
+            print timepoint, msg % (queries, latency/queries)
 
             # if the latency exceeds the defined threshold, increment the value
             # of successive latencies over the threshold
@@ -249,17 +256,20 @@ class GeneratorCoordinator(object):
             num_queries = succ_queries > consec_queries
             msgs = []
             if latencies:
-                msg = 'Latency was over %s ms for %s consecutive seconds'
+                msg = '%s Latency was over %s ms for %s consecutive seconds'
+                msg = msg % timepoint
                 msgs.append(msg % (max_latency, consec_latencies))
             if num_queries:
-                msg = 'Number of queries has fallen %s consecutive seconds'
+                msg = '%s Number of queries has fallen %s consecutive seconds'
+                msg = msg % timepoint
                 msgs.append(msg % consec_queries)
             if queries > max_queries:
-                msg = 'Number of queries per second has risen over %s'
+                msg = '%s Number of queries per second has risen over %s'
+                msg = msg % timepoint
                 msgs.append(msg % max_queries)
 
             if latencies or num_queries or queries > max_queries:
-                msgs.append('Shutting down.')
+                msgs.append('%s Shutting down.' % timepoint)
                 print '\n'.join(msgs)
                 self.events['shutdown'].set()
                 break

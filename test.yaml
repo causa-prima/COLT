@@ -9,7 +9,7 @@ schemata:
 workloads:
   fts:
     queries:
-      - query: SELECT * FROm first_test.test1
+      - query: SELECT * FROM first_test.test1
       # Testkommentar
       #- query: query_2
     ratio: 20

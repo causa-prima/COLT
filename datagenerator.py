@@ -16,6 +16,8 @@ class BaseGenerator(Process):
                  needs_more_input=None, shutdown=None,
                  config=None):
 
+        Process.__init__(self)
+
         # queues
         self.queue_in = queue_in
         self.queue_out = queue_out
@@ -70,7 +72,7 @@ class WorkloadGenerator(BaseGenerator):
                  needs_more_input=None, shutdown=None,
                  config=None, key_structs=None, max_inserted=None,
                  generator=None):
-        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -85,8 +87,8 @@ class WorkloadGenerator(BaseGenerator):
         self.ratio_sum = 0
         self.ratio_nums = {}
         for workload_name, workload_data in config['workloads'].items():
-            self.ratio_sum += workload_data['ratio']
             self.ratio_nums[self.ratio_sum] = workload_name
+            self.ratio_sum += workload_data['ratio']
 
     def process_item(self):
         # choose a workload to work on by picking
@@ -102,7 +104,7 @@ class WorkloadGenerator(BaseGenerator):
         for query in workload['queries']:
             query_data = []
             # queries without attributes don't need seeds
-            if query['attributes'] == 0:
+            if len(query['attributes']) == 0:
                 queries.append((False, query_data))
                 continue
             # we need the bitmap of seeds that were used as primary keys
@@ -208,7 +210,7 @@ class DataGenerator(BaseGenerator):
                  needs_more_input=None, shutdown=None,
                  config=None, connection_args_dict={},
                  generator=None):
-        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -256,7 +258,7 @@ class QueryGenerator(BaseGenerator):
                  needs_more_input=None, shutdown=None,
                  config=None, connection=None):
 
-        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -294,7 +296,7 @@ class LogGenerator(BaseGenerator):
                  config=None, max_inserted=None, logs=None,
                  queue_max_time=None, needs_more_processes=None):
 
-        BaseGenerator.__init__(queue_in=queue_in, queue_out=queue_out,
+        BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
@@ -307,7 +309,8 @@ class LogGenerator(BaseGenerator):
         self.needs_more_processes = needs_more_processes
 
     def process_item(self):
-        err, start, end, (workload, query_num, new) = self.queue_in.get()
+        result, start, end, (workload, query_num, new) = self.queue_in.get()
+        print 'LogGenerator: ', result, start, end, workload, query_num, new
         now = time()
         time_in_queue = (datetime.fromtimestamp(now) - end).seconds
         # check whether more LogGenerator processes are needed
@@ -317,7 +320,7 @@ class LogGenerator(BaseGenerator):
 
         now = int(now)
         # do not log execution times of errors
-        if not err:
+        if not result == None:
             with self.logs.lock:
                 try:
                     self.logs.latencies[now] += end - start
@@ -337,7 +340,7 @@ class LogGenerator(BaseGenerator):
         # errors occur when inserting new data, hence this case should be
         # considered.
         if new:
-            if err:
+            if result:
                 msg = 'New item should have been inserted, but an error occured.'
                 raise Warning(msg)
             table = workload['queries'][query_num]['table']

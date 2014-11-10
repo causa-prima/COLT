@@ -33,10 +33,13 @@ class BaseGenerator(Process):
         # configuration
         # TODO: pass only needed information
         self.config = config
+        print 'constructed %s named %s' % (self.__class__.__name__, self.name)
 
+    def __del__(self):
+        print '%s shutting down' % self.name
 
     def run(self):
-    # TODO: docstring
+        # TODO: docstring
         while True:
             # Check whether there is already enough data in the
             # output queue, and wait while there is.
@@ -49,6 +52,7 @@ class BaseGenerator(Process):
 
             # if it was decided it is time to shut down - do so!
             if self.shutdown.is_set():
+                print '%s got shutdown signal' % self.name
                 break
 
             # check whether more input is needed
@@ -253,18 +257,32 @@ class DataGenerator(BaseGenerator):
 
 class QueryGenerator(BaseGenerator):
     # TODO: DocString
+
+    connection = None
+
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
-                 config=None, connection=None):
+                 config=None,
+                 connection_class=None, connection_args=None):
 
         BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
-        # TODO: Are multiple connection objects needed or is it sufficient to share one over all QueryGenerators?
-        self.connection = connection
+
+        # the connection has to be established _AFTER_ the subprocess was
+        # created, so we need to decorate the 'run()' method of BaseGenerator
+        self.connection_class = connection_class
+        self.connection_args = connection_args
+        self._run = super(QueryGenerator, self).run
+
+    def run(self):
+        # decorating the 'run()' method of BaseGenerator to establish the
+        # connection after subprocess creation
+        self.connection = self.connection_class(**self.connection_args)
+        self._run()
 
     def process_item(self):
         """ Generates queries with data from the input queue,
@@ -310,7 +328,7 @@ class LogGenerator(BaseGenerator):
 
     def process_item(self):
         result, start, end, (workload, query_num, new) = self.queue_in.get()
-        print 'LogGenerator: ', result, start, end, workload, query_num, new
+        # print 'LogGenerator: ', result, start, end, workload, query_num, new
         now = time()
         time_in_queue = (datetime.fromtimestamp(now) - end).seconds
         # check whether more LogGenerator processes are needed
@@ -323,9 +341,13 @@ class LogGenerator(BaseGenerator):
         if not result == None:
             with self.logs.lock:
                 try:
+                    # print 'incrementing values for timestamp %s' % now
                     self.logs.latencies[now] += end - start
                     self.logs.queries[now] += 1
                 except KeyError:
+                    # print 'LogGenerator: creating values for timestamp %s' % now
+                    # print self.logs.latencies
+                    # print self.logs.queries
                     self.logs.latencies[now] = end - start
                     self.logs.queries[now] = 1
 

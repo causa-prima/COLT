@@ -1,4 +1,5 @@
 from datetime import datetime
+from time import sleep
 
 from cassandra.cluster import Cluster
 
@@ -41,29 +42,43 @@ class CassandraConnection(ConnectionInterface):
         :param multiprocessing.Queue queue_out: the queue in which to put the results
         :param tuple metadata: metadata needed for logging. default = None
         """
-        print 'metadata:', self.cluster.metadata
+
         # we need to wrap the queue.put() function to handle both callbacks
         # (see there for further explanation)
-        def success(response, start, mdata):
-            print 'CassandraConnection success: ', None, start, datetime.now(), mdata
-            queue_out.put((response, start, datetime.now(), mdata))
-        def failure(response, start, mdata):
-            print 'CassandraConnection failure: ', response, start, datetime.now(), mdata
-            print response.__dict__
-            queue_out.put((response, start, datetime.now(), mdata))
+
         # execute query asynchronously, returning a ResponseFuture-object
         # to which callbacks can be added
-        future = self.session.execute_async(statement, parameters)
+        #print 'Statement: %s Parameters: %s' % (statement, parameters)
+        future = self.session.execute_async(statement, trace=True)
+        #print 'resulting query: %s request_id: %s' % (future.query, future._req_id)
         # Add a callback to fn which puts data needed by the LogGenerator into
         # the queue. The errback calls the stated function with the error as
         # first positional parameter, the normal callback just calls it with
         # the given parameters. To handle both cases the wrapper function fn is
         # used, which gets 'None' as first parameter in the non-error-case.
-        future.add_callbacks(callback=success, callback_args=(
-                            datetime.now(), metadata),
-                            errback=failure, errback_args=(
-                            (datetime.now(), metadata))
+
+        # start = datetime.now()
+        # try:
+        #     response = future.result()
+        # except Exception as e:
+        #     print e
+
+        #print 'Trace: %s' % future.get_query_trace()
+        #queue_out.put((response, start, datetime.now(), metadata))
+        future.add_callbacks(callback=self.success, callback_args=(
+                            datetime.now(), metadata, queue_out),
+                            errback=self.failure, errback_args=(
+                            (datetime.now(), metadata, queue_out))
                             )
+
+    def success(self, response, start, mdata, queue_out):
+        # print 'CassandraConnection success: ', None, start, datetime.now(), mdata
+        queue_out.put((response, start, datetime.now(), mdata))
+
+    def failure(self, response, start, mdata, queue_out):
+        # print 'CassandraConnection failure: ', response, start, datetime.now(), mdata
+        # response = 'ERROR! Message: %s Errors: %s' % (response.message, response.errors)
+        queue_out.put((response, start, datetime.now(), mdata))
 
     def fn(self, err, start, mdata, queue):
         print 'CassandraConnection: ', err, start, datetime.now(), mdata

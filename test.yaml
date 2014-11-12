@@ -20,5 +20,5 @@ config:
       max: 100 # Value in ms
       consecutive: 5
     queries:
-      max: 10 # bonus parameter
+      # max: 10 # bonus parameter
       consecutive: 5

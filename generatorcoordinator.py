@@ -12,7 +12,7 @@ class GeneratorCoordinator(object):
     manager = Manager()
 
     def __init__(self, config, random_class, connection_class, connection_args={},
-                 queue_target_size=100000, max_processes=50):
+                 queue_target_size=100, max_processes=50):
         # TODO: complete docstring
         """ The GeneratorCoordinator spawns multiple processes for data
         and query generation. Generators communicate via queues,
@@ -62,9 +62,9 @@ class GeneratorCoordinator(object):
         self.queue_notify_size = .5 * self.queue_target_size
 
         # All the queues needed for inter process communication
-        self.queues = {'next_workload': Queue(),
-                       'workload_data': Queue(),
-                       'executed_queries': Queue()}
+        self.queues = {'next_workload': self.manager.Queue(),
+                       'workload_data': self.manager.Queue(),
+                       'executed_queries': self.manager.Queue()}
 
         # Events for the coordinator to check if new processes have to be
         # created. Each class of generators gets it own Event.
@@ -79,6 +79,7 @@ class GeneratorCoordinator(object):
 
         # Log data of execution times
         self.logs = type('', (object,), {})
+        # TODO: lock needed for manager objects?
         self.logs.lock = Lock()
         self.logs.latencies = self.manager.dict()
         self.logs.queries = self.manager.dict()
@@ -96,10 +97,10 @@ class GeneratorCoordinator(object):
         self.config = config
 
     def start(self):
-        wl_generator = self.generate_generator('workload')
-        data_generator = self.generate_generator('data')
-        query_generator = self.generate_generator('query')
-        logger = self.generate_generator('logger')
+        wl_generator = self.generate_generator('Workload')
+        data_generator = self.generate_generator('Data')
+        query_generator = self.generate_generator('Query')
+        logger = self.generate_generator('Log')
         watcher = Process(target=watch_and_report,
                           args=(self.config, self.logs, self.events))
         self.processes = [wl_generator, data_generator,
@@ -115,7 +116,8 @@ class GeneratorCoordinator(object):
         self.supervise()
 
     def generate_generator(self, generator_type):
-        if generator_type == 'workload':
+        print 'creating new %sGenerator' % generator_type
+        if generator_type == 'Workload':
             return WorkloadGenerator(queue_out=self.queues['next_workload'],
                                      shutdown=self.events['shutdown'],
                                      queue_target_size=self.queue_target_size,
@@ -123,7 +125,7 @@ class GeneratorCoordinator(object):
                                      config=self.config,
                                      key_structs=self.key_structs,
                                      generator=self.random_class())
-        if generator_type == 'data':
+        if generator_type == 'Data':
             return DataGenerator(queue_in=self.queues['next_workload'],
                                  queue_out=self.queues['workload_data'],
                                  needs_more_input=self.events['DataGenerators'],
@@ -132,7 +134,7 @@ class GeneratorCoordinator(object):
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config,
                                  generator=self.random_class())
-        if generator_type == 'query':
+        if generator_type == 'Query':
             return QueryGenerator(queue_in=self.queues['workload_data'],
                                   queue_out=self.queues['executed_queries'],
                                   needs_more_input=self.events['QueryGenerators'],
@@ -142,7 +144,7 @@ class GeneratorCoordinator(object):
                                   config=self.config,
                                   connection_class=self.connection_class,
                                   connection_args=self.connection_args)
-        if generator_type == 'logger':
+        if generator_type == 'Log':
             return LogGenerator(queue_in=self.queues['executed_queries'],
                                 needs_more_input=self.events['LogGenerators'],
                                 shutdown=self.events['shutdown'],
@@ -169,37 +171,41 @@ class GeneratorCoordinator(object):
             if events['shutdown'].is_set():
                 # wait for all child processes to end before leaving the
                 # while-loop
-                print '%s got shutdown signal' % self.__class__.__name__
                 while len(self.processes) > 0:
                     proc = self.processes.pop(0)
-                    print 'waiting for %s to shut down' % proc
-                    proc.join(.5)
+                    proc.join(.1)
                     if proc.is_alive():
                         self.processes.append(proc)
                 break
 
             new_processes = []
 
+            if len(self.processes) >= self.max_processes:
+                continue
+
             # check which queue needs more input and create the
             # corresponding generator if needed
             if events['DataGenerators'].is_set() and \
                         queues['next_workload'].qsize() < notify_size:
-                new_processes.append(self.generate_generator('workload'))
+                new_processes.append(self.generate_generator('Workload'))
             if events['QueryGenerators'].is_set() and \
                         queues['workload_data'].qsize() < notify_size:
-                new_processes.append(self.generate_generator('data'))
+                new_processes.append(self.generate_generator('Data'))
             if events['LogGenerators'] and \
                         queues['executed_queries'].qsize() < notify_size:
-                new_processes.append(self.generate_generator('query'))
+                new_processes.append(self.generate_generator('Query'))
 
-            # check if the logger needs more processes
+            # check if more LogGenerators are needed
             if events['LogGenerators2'] or \
                         queues['executed_queries'].qsize() > target_size:
-                new_processes.append(self.generate_generator('logger'))
+                new_processes.append(self.generate_generator('Log'))
 
             # start all newly generated processes
             for proc in new_processes:
                 self.processes.append(proc)
+                if len(self.processes) >= self.max_processes:
+                    print 'Maximum number of processes reached.'
+                    break
                 proc.start()
 
             # reset all signals
@@ -220,7 +226,10 @@ def watch_and_report(config, logs, events):
     term_conds = config['config']['termination conditions']
     max_latency = term_conds['latency']['max']
     consec_latencies = term_conds['latency']['consecutive']
-    max_queries = term_conds['queries']['max']
+    try:
+        max_queries = term_conds['queries']['max']
+    except KeyError:
+        max_queries = None
     consec_queries = term_conds['queries']['consecutive']
     succ_latencies = 0
     succ_queries = 0
@@ -230,20 +239,30 @@ def watch_and_report(config, logs, events):
         last_second = int(time())-1
         timepoint = datetime.fromtimestamp(last_second)
         try:
-            with logs.lock:
-                # print only values of the last second, as the older ones
-                # don't change anymore
-                # print logs.latencies
-                # print logs.queries
-                queries = logs.queries[last_second]
-                latency = logs.latencies[last_second].total_seconds()*1000/queries
+            # with logs.lock:
+            # print only values of the last second, as the older ones
+            # don't change anymore
+            queries = logs.queries[last_second]
+            latencies = logs.latencies[last_second]
+            latency_sum = 0
+            for latency, _, _ in latencies:
+                latency_sum += latency.total_seconds()*1000
+            print 'latency_sum: %s' % latency_sum
+            if len(latencies) != queries:
+                print
+                print '*' * 500
+                print 'QueryNums differ!'
+                print 'len(latencies): %s #queries: %s' % (len(latencies),queries)
+                print '*' * 500
+                print
+            latency = latency_sum/queries
         except KeyError:
             print timepoint, 'No data'
             # sleep until the next second, then continue
             sleep(last_second+2.25-time())
             continue
-        msg = 'queries/sec: %10i     avg latency: %10.2f ms'
-        print timepoint, msg % (queries, latency)
+        msg = '%s     queries/sec: %10i     avg latency: %10.2f ms'
+        print msg % (timepoint, queries, latency)
 
         # if the latency exceeds the defined threshold, increment the value
         # of successive latencies over the threshold
@@ -265,6 +284,7 @@ def watch_and_report(config, logs, events):
         # and set shutdown signal accordingly
         latencies = succ_latencies > consec_latencies
         num_queries = succ_queries > consec_queries
+        max_queries_b = (max_queries is not None) and (queries > max_queries)
         msgs = []
         if latencies:
             msg = '%s Latency was over %s ms for %s consecutive seconds'
@@ -274,22 +294,20 @@ def watch_and_report(config, logs, events):
             msg = '%s Number of queries has fallen %s consecutive seconds'
             msg = msg % (timepoint, succ_queries)
             msgs.append(msg)
-        if queries > max_queries:
+        if max_queries_b:
             msg = '%s Number of queries per second has risen over %s'
             msg = msg % (timepoint, max_queries)
             msgs.append(msg)
 
-        if latencies or num_queries or queries > max_queries:
+        if latencies or num_queries or max_queries_b:
             msgs.append('%s Shutting down.' % timepoint)
             print '\n'.join(msgs)
             events['shutdown'].set()
             break
 
         # sleep until the next second
+        # TODO: what if computation took more than one second?
         sleep(last_second+2.25-time())
-
-    print 'watch_and_report shutting down'
-
 
 
 # helper functions to provide waiting for multiple events simultaneously,

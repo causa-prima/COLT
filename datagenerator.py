@@ -10,7 +10,6 @@ class BaseGenerator(Process):
     queue size limit for the signal raising.
 
     """
-
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
@@ -33,10 +32,7 @@ class BaseGenerator(Process):
         # configuration
         # TODO: pass only needed information
         self.config = config
-        print 'constructed %s named %s' % (self.__class__.__name__, self.name)
 
-    def __del__(self):
-        print '%s shutting down' % self.name
 
     def run(self):
         # TODO: docstring
@@ -52,7 +48,6 @@ class BaseGenerator(Process):
 
             # if it was decided it is time to shut down - do so!
             if self.shutdown.is_set():
-                print '%s got shutdown signal' % self.name
                 break
 
             # check whether more input is needed
@@ -326,30 +321,48 @@ class LogGenerator(BaseGenerator):
         self.queue_max_time = queue_max_time
         self.needs_more_processes = needs_more_processes
 
+        self.now = int(time())
+        self.latencies = []
+        self.num_queries = 0
+
     def process_item(self):
         result, start, end, (workload, query_num, new) = self.queue_in.get()
-        # print 'LogGenerator: ', result, start, end, workload, query_num, new
         now = time()
-        time_in_queue = (datetime.fromtimestamp(now) - end).seconds
+        time_in_queue = (datetime.fromtimestamp(now) - end).total_seconds()
+
         # check whether more LogGenerator processes are needed
         if time_in_queue > self.queue_max_time or\
                         self.queue_in.qsize() > self.queue_target_size:
             self.needs_more_processes.set()
+            print 'time in queue:', time_in_queue
 
         now = int(now)
-        # do not log execution times of errors
-        if not result == None:
+        # check whether the next second is reached and
+        # if there is output for queue_out
+        if (now > self.now) and self.num_queries > 0:
+            # put the results into the GeneratorCoordinator's
+            # synchronized objects and reset the variables
+            # TODO: synchronization does NOT work!
             with self.logs.lock:
                 try:
-                    # print 'incrementing values for timestamp %s' % now
-                    self.logs.latencies[now] += end - start
-                    self.logs.queries[now] += 1
+                    latencies = self.logs.latencies[self.now]
+                    latencies.extend(self.latencies)
+                    self.logs.latencies[self.now] = latencies
+                    self.num_queries += self.logs.queries[self.now]
+                    self.logs.queries[self.now] += self.num_queries
                 except KeyError:
-                    # print 'LogGenerator: creating values for timestamp %s' % now
-                    # print self.logs.latencies
-                    # print self.logs.queries
-                    self.logs.latencies[now] = end - start
-                    self.logs.queries[now] = 1
+                    self.logs.latencies[self.now] = self.latencies
+                    self.logs.queries[self.now] = self.num_queries
+            self.now = now
+            self.latencies = []
+            self.num_queries = 0
+
+        # do not log execution times of errors
+        # TODO: test error case
+        if result is not None:
+                self.latencies.append((end - start, workload, query_num))
+                self.num_queries += 1
+
 
         # If a new item was generated, the max_inserted counter needs to be
         # incremented for the WorkloadGenerators to notice this.
@@ -368,41 +381,3 @@ class LogGenerator(BaseGenerator):
             table = workload['queries'][query_num]['table']
             with self.max_inserted[table].get_lock():
                 self.max_inserted[table].value += 1
-
-
-
-
-#test = DataGenerator()
-
-"""
-def testprogramm():
-    for _ in test.whole_table_generator('test', 'insanitytest', 100000):
-        pass
-    #for _ in range(10000):
-    #    test.generate_row('test','insanitytest')
-import cProfile
-cProfile.run("testprogramm()", sort='time')
-
-
-'''
-from pycallgraph import PyCallGraph
-from pycallgraph.output import GraphvizOutput
-from pycallgraph import Config
-
-config = Config(max_depth=100, include_stdlib=True)
-with PyCallGraph(output=GraphvizOutput(output_file='/home/causa-prima/callgraph.png'), config=config):
-    for _ in test.whole_table_generator('test', 'insanitytest', 100):
-        pass
-'''
-"""
-
-'''
-numbers = set([0, 18706, 54552, 77609, 86727, 32664, 80992, 24563, 91197, 39624, 34807])
-
-for i in range(100000):
-    res = test.generate_row('test', 'test', i)
-    if i in numbers:
-        print i, res
-for number in sorted(numbers):
-    print number, test.generate_items('test','test',{'name':number,'address':number,'uid':number, 'lval':number})
-'''

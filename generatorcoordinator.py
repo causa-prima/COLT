@@ -1,4 +1,5 @@
-from multiprocessing import Event, Lock, Process, Queue, Value, Manager
+from multiprocessing import Event, Lock, Process, Value
+from multiprocessing.managers import SyncManager
 from time import time, sleep
 from datetime import datetime
 
@@ -9,10 +10,13 @@ from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogG
 
 class GeneratorCoordinator(object):
 
-    manager = Manager()
+    # register the bitarray type to use it as a managed object
+    SyncManager.register('bitarray', bitarray)
+    manager = SyncManager()
+    manager.start()
 
     def __init__(self, config, random_class, connection_class, connection_args={},
-                 queue_target_size=100, max_processes=50):
+                 queue_target_size=10, max_processes=4):
         # TODO: complete docstring
         """ The GeneratorCoordinator spawns multiple processes for data
         and query generation. Generators communicate via queues,
@@ -42,16 +46,12 @@ class GeneratorCoordinator(object):
         # two dicts are needed to handle both processes separately.
         self.key_structs = {}
         # The number of generated data items per table written to the database
-        # TODO: numbers can be incorrect on runtime
         # See LogGenerator's process_item for further information.
         self.max_inserted = {}
         for table in config['tables'].keys():
-            # hacky way to construct an object to
-            # which attributes can be assigned
-            key_struct = type('', (object,), {}) # self.manager.Namespace() #
-            key_struct.lock = Lock()
-            key_struct.bitmap = bitarray()
-            self.key_structs[table] = key_struct
+            bitmap = self.manager.bitarray()
+            bitmap.lock = Lock()
+            self.key_structs[table] = bitmap
             self.max_inserted[table] = Value('L', 0)
             # TODO: import old data: import key bitmap or regenerate?
 
@@ -78,11 +78,8 @@ class GeneratorCoordinator(object):
         self.supervision_needed = OrEvent(*self.events.values())
 
         # Log data of execution times
-        self.logs = type('', (object,), {})
-        # TODO: lock needed for manager objects?
-        self.logs.lock = Lock()
-        self.logs.latencies = self.manager.dict()
-        self.logs.queries = self.manager.dict()
+        self.latencies = self.manager.dict()
+        self.latencies.lock = self.manager.Lock()
 
         # list of all running processes
         self.processes = []
@@ -102,7 +99,7 @@ class GeneratorCoordinator(object):
         query_generator = self.generate_generator('Query')
         logger = self.generate_generator('Log')
         watcher = Process(target=watch_and_report,
-                          args=(self.config, self.logs, self.events))
+                          args=(self.config, self.latencies, self.events))
         self.processes = [wl_generator, data_generator,
                           query_generator, logger,
                           watcher]
@@ -124,7 +121,7 @@ class GeneratorCoordinator(object):
                                      queue_notify_size=self.queue_notify_size,
                                      config=self.config,
                                      key_structs=self.key_structs,
-                                     generator=self.random_class())
+                                     generator_class=self.random_class)
         if generator_type == 'Data':
             return DataGenerator(queue_in=self.queues['next_workload'],
                                  queue_out=self.queues['workload_data'],
@@ -133,7 +130,7 @@ class GeneratorCoordinator(object):
                                  queue_target_size=self.queue_target_size,
                                  queue_notify_size=self.queue_notify_size,
                                  config=self.config,
-                                 generator=self.random_class())
+                                 generator_class=self.random_class)
         if generator_type == 'Query':
             return QueryGenerator(queue_in=self.queues['workload_data'],
                                   queue_out=self.queues['executed_queries'],
@@ -155,7 +152,7 @@ class GeneratorCoordinator(object):
                                 # TODO: set it to value of connection/query timeout
                                 queue_max_time=10,
                                 max_inserted=self.max_inserted,
-                                logs=self.logs,
+                                latencies=self.latencies,
                                 needs_more_processes=self.events['LogGenerators2'])
 
     def supervise(self):
@@ -202,10 +199,10 @@ class GeneratorCoordinator(object):
 
             # start all newly generated processes
             for proc in new_processes:
-                self.processes.append(proc)
                 if len(self.processes) >= self.max_processes:
                     print 'Maximum number of processes reached.'
                     break
+                self.processes.append(proc)
                 proc.start()
 
             # reset all signals
@@ -242,19 +239,12 @@ def watch_and_report(config, logs, events):
             # with logs.lock:
             # print only values of the last second, as the older ones
             # don't change anymore
-            queries = logs.queries[last_second]
-            latencies = logs.latencies[last_second]
+            latencies = logs[last_second]
+            queries = len(latencies)
             latency_sum = 0
             for latency, _, _ in latencies:
                 latency_sum += latency.total_seconds()*1000
             print 'latency_sum: %s' % latency_sum
-            if len(latencies) != queries:
-                print
-                print '*' * 500
-                print 'QueryNums differ!'
-                print 'len(latencies): %s #queries: %s' % (len(latencies),queries)
-                print '*' * 500
-                print
             latency = latency_sum/queries
         except KeyError:
             print timepoint, 'No data'

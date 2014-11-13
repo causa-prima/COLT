@@ -33,6 +33,13 @@ class BaseGenerator(Process):
         # TODO: pass only needed information
         self.config = config
 
+        self.after_init()
+
+    def after_init(self):
+        """ Method called after the process creation to construct own objects.
+        """
+        pass
+
 
     def run(self):
         # TODO: docstring
@@ -44,7 +51,7 @@ class BaseGenerator(Process):
                     not self.shutdown.is_set():
                 # wait for more input, but don't ignore the shutdown signal
                 # TODO: How long should be waited?
-                self.shutdown.wait(.01)
+                self.shutdown.wait(.00001)
 
             # if it was decided it is time to shut down - do so!
             if self.shutdown.is_set():
@@ -66,11 +73,14 @@ class BaseGenerator(Process):
 class WorkloadGenerator(BaseGenerator):
     # TODO: DocString
     # TODO: the WorkloadGenerator is too Cassandra-specific, either solve that or put it into a own module
+    generator = None
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
-                 config=None, key_structs=None, max_inserted=None,
-                 generator=None):
+                 config=None, key_structs=None, generator_class=None):
+
+        self.generator_class = generator_class
+
         BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
@@ -78,8 +88,6 @@ class WorkloadGenerator(BaseGenerator):
                            shutdown=shutdown, config=config)
 
         self.key_structs = key_structs
-        self.max_inserted = max_inserted
-        self.generator = generator
 
         # aggregate the chances and map the chances
         # of each workload into [0,ratio_sum]
@@ -88,6 +96,9 @@ class WorkloadGenerator(BaseGenerator):
         for workload_name, workload_data in config['workloads'].items():
             self.ratio_nums[self.ratio_sum] = workload_name
             self.ratio_sum += workload_data['ratio']
+
+    def after_init(self):
+        self.generator = self.generator_class()
 
     def process_item(self):
         # choose a workload to work on by picking
@@ -113,7 +124,7 @@ class WorkloadGenerator(BaseGenerator):
             if query['type'] == 'insert':
                 # lock the bitmap for the table the item will be stored in
                 with key_struct.lock:
-                    partition_seed = len(key_struct.bitmap)
+                    partition_seed = key_struct.length()
                     cluster_seed = partition_seed
                     # seed the generator to produce regeneratable results
                     self.generator.seed(partition_seed)
@@ -128,14 +139,14 @@ class WorkloadGenerator(BaseGenerator):
                         # which always generates a completely new item.
                         while True:
                             cluster_seed = self.generator.randrange(0, partition_seed+1)
-                            if key_struct.bitmap[cluster_seed] or cluster_seed == 0:
+                            if key_struct[cluster_seed] or cluster_seed == 0:
                                 break
 
                     # Tell the other processes what happened by appending the
                     # choice we made to the bitmap. The or-part makes sure that
                     # bitmap[0] is always 1, i.e. seed zero always generates a
                     # completely new item
-                    key_struct.bitmap.append(new_cluster or cluster_seed == partition_seed)
+                    key_struct.append(new_cluster or cluster_seed == partition_seed)
 
             # query types other than insert need the partition and cluster key
             # to access specific data. Note that:
@@ -150,20 +161,16 @@ class WorkloadGenerator(BaseGenerator):
                 # random old seed and look what happened with that seed. If it
                 # generated a new cluster for another partition key, get that
                 # key by following the steps that originally led to that key.
-
-                # Note that this number does not necessarily represent the seed
-                # that was used to generate the new item. For further
-                # information check the LogGenerator's process_item method.
-                with self.max_inserted[table].get_lock():
-                    partition_seed = self.max_inserted[table].value
-
-                partition_seed = self.generator.randrange(0, partition_seed)
-                cluster_seed = partition_seed
-
                 with key_struct.lock:
+                    # determine the highest used seed
+                    # Notice that the data item produced by this seed might not
+                    # be in the database if an error occurred while processing.
+                    # See comment on max_inserted LogGenerator for more details.
+                    partition_seed = self.generator.randrange(0, key_struct.length())
+                    cluster_seed = partition_seed
                     # if this seed did not produce a completely new item the
                     # partition key it did produce a new cluster for is needed
-                    if not key_struct.bitmap[partition_seed]:
+                    if not key_struct[partition_seed]:
                         self.generator.seed(partition_seed)
                         # When generating a new cluster it is first tested if
                         # a new cluster will be generated by using a random
@@ -173,7 +180,7 @@ class WorkloadGenerator(BaseGenerator):
                         # notice this takes 1/chance steps on average
                         while True:
                             cluster_seed = self.generator.randrange(0, partition_seed+1)
-                            if key_struct.bitmap[cluster_seed] or cluster_seed == 0:
+                            if key_struct[cluster_seed] or cluster_seed == 0:
                                 break
             else:
                 msg = 'unsupported query type %s' % query[type]
@@ -199,23 +206,30 @@ class WorkloadGenerator(BaseGenerator):
             queries.append((query['type'] == 'insert', query_data))
 
         # put the workload with its data into the queue
-        self.queue_out.put((workload, queries))
+        self.queue_out.put((workload_name, queries))
 
 
 class DataGenerator(BaseGenerator):
     # TODO: DocString
+
+    generator = None
+
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
-                 config=None, connection_args_dict={},
-                 generator=None):
+                 config=None,
+                 generator_class=None):
+
+        self.generator_class = generator_class
+
         BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
 
-        self.generator = generator
+    def after_init(self):
+        self.generator = self.generator_class()
 
     def process_item(self):
         """ Generates the data for workload from the input queue and
@@ -223,12 +237,11 @@ class DataGenerator(BaseGenerator):
         """
 
         # get and unpack the item we want to process
-        workload, queries = self.queue_in.get()
+        workload_name, queries = self.queue_in.get()
 
-        # Each workload could have multiple queries. Each query could
-        # need multiple columns. Each column could be needed more
-        # than once. Each column instance could be needed with
-        # different configurations.
+        # Each workload could have multiple queries. Each query could need
+        # multiple columns. Each column could be needed more than once. Each
+        # column instance could be needed with different configurations.
         workload_data = []
         for new, query in queries:
             query_values = []
@@ -247,7 +260,7 @@ class DataGenerator(BaseGenerator):
             workload_data.append((new, query_values))
 
         # repack the item and put it into the output queue
-        self.queue_out.put((workload, workload_data))
+        self.queue_out.put((workload_name, workload_data))
 
 
 class QueryGenerator(BaseGenerator):
@@ -261,23 +274,17 @@ class QueryGenerator(BaseGenerator):
                  config=None,
                  connection_class=None, connection_args=None):
 
+        self.connection_class = connection_class
+        self.connection_args = connection_args
+
         BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
                            queue_target_size=queue_target_size,
                            queue_notify_size=queue_notify_size,
                            needs_more_input=needs_more_input,
                            shutdown=shutdown, config=config)
 
-        # the connection has to be established _AFTER_ the subprocess was
-        # created, so we need to decorate the 'run()' method of BaseGenerator
-        self.connection_class = connection_class
-        self.connection_args = connection_args
-        self._run = super(QueryGenerator, self).run
-
-    def run(self):
-        # decorating the 'run()' method of BaseGenerator to establish the
-        # connection after subprocess creation
+    def after_init(self):
         self.connection = self.connection_class(**self.connection_args)
-        self._run()
 
     def process_item(self):
         """ Generates queries with data from the input queue,
@@ -286,17 +293,17 @@ class QueryGenerator(BaseGenerator):
         """
 
         # get and unpack the item we want to process
-        workload, workload_data = self.queue_in.get()
+        workload_name, workload_data = self.queue_in.get()
 
         query_num = 0
-
+        queries = self.config['workloads'][workload_name]['queries']
         for new, query_values in workload_data:
             # for each query, get the prepared statement and call the connection
             # object to bind and execute the query, which automatically puts
             # resulting execution times into the out_queue
-            prep_stmnt = workload['queries'][query_num]['prepared_statement']
+            prep_stmnt = queries[query_num]['prepared_statement']
             self.connection.execute(prep_stmnt, query_values, self.queue_out,
-                                    metadata=(workload, query_num, new))
+                                    metadata=(workload_name, query_num, new))
 
             query_num += 1
 
@@ -306,7 +313,8 @@ class LogGenerator(BaseGenerator):
     def __init__(self, queue_in=None, queue_out=None,
                  queue_target_size=0, queue_notify_size=0,
                  needs_more_input=None, shutdown=None,
-                 config=None, max_inserted=None, logs=None,
+                 config=None,
+                 max_inserted=None, latencies=None,
                  queue_max_time=None, needs_more_processes=None):
 
         BaseGenerator.__init__(self, queue_in=queue_in, queue_out=queue_out,
@@ -317,16 +325,15 @@ class LogGenerator(BaseGenerator):
 
         self.max_inserted = max_inserted
         # dict to log the execution times as datetime.timedelta
-        self.logs = logs
+        self.latencies = latencies
         self.queue_max_time = queue_max_time
         self.needs_more_processes = needs_more_processes
 
         self.now = int(time())
-        self.latencies = []
-        self.num_queries = 0
+        self.processed_latencies = []
 
     def process_item(self):
-        result, start, end, (workload, query_num, new) = self.queue_in.get()
+        result, start, end, (workload_name, query_num, new) = self.queue_in.get()
         now = time()
         time_in_queue = (datetime.fromtimestamp(now) - end).total_seconds()
 
@@ -334,38 +341,33 @@ class LogGenerator(BaseGenerator):
         if time_in_queue > self.queue_max_time or\
                         self.queue_in.qsize() > self.queue_target_size:
             self.needs_more_processes.set()
-            print 'time in queue:', time_in_queue
+            # print 'time in queue:', time_in_queue
 
         now = int(now)
-        # check whether the next second is reached and
-        # if there is output for queue_out
-        if (now > self.now) and self.num_queries > 0:
+        num_queries = len(self.processed_latencies)
+        # check whether the next second is reached and if there is output data
+        if (now > self.now) and num_queries > 0:
             # put the results into the GeneratorCoordinator's
             # synchronized objects and reset the variables
             # TODO: synchronization does NOT work!
-            with self.logs.lock:
+            with self.latencies.lock:
                 try:
-                    latencies = self.logs.latencies[self.now]
-                    latencies.extend(self.latencies)
-                    self.logs.latencies[self.now] = latencies
-                    self.num_queries += self.logs.queries[self.now]
-                    self.logs.queries[self.now] += self.num_queries
+                    print '%5i queries reported by %s' % (num_queries, self.name)
+                    latencies = self.latencies[self.now]
+                    latencies.extend(self.processed_latencies)
+                    self.latencies[self.now] = latencies
                 except KeyError:
-                    self.logs.latencies[self.now] = self.latencies
-                    self.logs.queries[self.now] = self.num_queries
+                    self.latencies[self.now] = self.processed_latencies
             self.now = now
-            self.latencies = []
-            self.num_queries = 0
+            self.processed_latencies = []
 
         # do not log execution times of errors
         # TODO: test error case
         if result is not None:
-                self.latencies.append((end - start, workload, query_num))
-                self.num_queries += 1
+                self.processed_latencies.append((end - start, workload_name, query_num))
 
 
-        # If a new item was generated, the max_inserted counter needs to be
-        # incremented for the WorkloadGenerators to notice this.
+        # Increment the max_inserted counter if a new item was generated.
         # Note that this number does not necessarily represent the seed that
         # was used to generate the new item, as queries should happen
         # asynchronously. To guarantee that max_inserted equals the maximum
@@ -378,6 +380,6 @@ class LogGenerator(BaseGenerator):
             if result:
                 msg = 'New item should have been inserted, but an error occured.'
                 raise Warning(msg)
-            table = workload['queries'][query_num]['table']
+            table = self.config['workloads'][workload_name]['queries'][query_num]['table']
             with self.max_inserted[table].get_lock():
                 self.max_inserted[table].value += 1

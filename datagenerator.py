@@ -166,7 +166,7 @@ class WorkloadGenerator(BaseGenerator):
                     # Notice that the data item produced by this seed might not
                     # be in the database if an error occurred while processing.
                     # See comment on max_inserted LogGenerator for more details.
-                    partition_seed = self.generator.randrange(0, key_struct.length())
+                    partition_seed = self.generator.randrange(0, key_struct.length()+1)
                     cluster_seed = partition_seed
                     # if this seed did not produce a completely new item the
                     # partition key it did produce a new cluster for is needed

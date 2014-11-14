@@ -1,5 +1,5 @@
 from multiprocessing import Event, Lock, Process, Value
-from multiprocessing.managers import SyncManager
+from multiprocessing.managers import SyncManager, MakeProxyType, ListProxy
 from time import time, sleep
 from datetime import datetime
 
@@ -7,11 +7,20 @@ from bitarray import bitarray
 
 from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogGenerator
 
-
 class GeneratorCoordinator(object):
 
+    # Create a proxy for the bitarray type so all it's methods can be used.
+    # First, define all mehtods that should not be exposed, than substract
+    # them from all bitarray-methods. Finally, make a proxy type with
+    # all wanted methods.
+    non_exposed = set(("__class__", "__copy__", "__deepcopy__", "__delattr__",
+                       "__dict__", "__doc__", "__format__", "__getattribute__",
+                       "__init__", "__module__", "__new__", "__repr__",
+                       "__setattr__", "__str__", "__subclasshook__"))
+    methods = tuple(set(dir(bitarray)) - non_exposed)
+    bitarrayProxy = MakeProxyType('bitarrayProxy', methods)
     # register the bitarray type to use it as a managed object
-    SyncManager.register('bitarray', bitarray)
+    SyncManager.register('bitarray', bitarray, bitarrayProxy)
     manager = SyncManager()
     manager.start()
 
@@ -236,7 +245,7 @@ def watch_and_report(config, logs, events):
         last_second = int(time())-1
         timepoint = datetime.fromtimestamp(last_second)
         try:
-            # with logs.lock:
+            # TODO: output a chosen percentile instead of the mean
             # print only values of the last second, as the older ones
             # don't change anymore
             latencies = logs[last_second]

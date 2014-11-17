@@ -3,8 +3,9 @@ from time import mktime
 from uuid import UUID
 from decimal import Decimal
 from random import Random
-from string import printable
 
+# TODO: printables don't include '\t', '\n', '\r', '\x0b' and '\x0c', but for some string these might be needed. add a paramter to optionally include these
+printable = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~ '
 
 class PythonTypes(Random):
     """

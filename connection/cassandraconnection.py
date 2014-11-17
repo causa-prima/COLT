@@ -43,32 +43,28 @@ class CassandraConnection(ConnectionInterface):
         :param tuple metadata: metadata needed for logging. default = None
         """
 
-        # we need to wrap the queue.put() function to handle both callbacks
-        # (see there for further explanation)
-
         # execute query asynchronously, returning a ResponseFuture-object
         # to which callbacks can be added
-        # future = self.session.execute_async(statement, trace=True)
+        future = self.session.execute_async(statement, parameters)
         # Add a callback to fn which puts data needed by the LogGenerator into
         # the queue. The errback calls the stated function with the error as
         # first positional parameter, the normal callback just calls it with
         # the given parameters. To handle both cases the wrapper function fn is
         # used, which gets 'None' as first parameter in the non-error-case.
+        future.add_callbacks(callback=self.success, callback_args=(
+                            datetime.now(), metadata, queue_out, parameters),
+                            errback=self.failure, errback_args=(
+                            (datetime.now(), metadata, queue_out))
+                            )
+        # queue_out.put(([], datetime.now(), datetime.now(), metadata))
 
-        queue_out.put(([], datetime.now(), datetime.now(), metadata))
-        # future.add_callbacks(callback=self.success, callback_args=(
-        #                     datetime.now(), metadata, queue_out),
-        #                     errback=self.failure, errback_args=(
-        #                     (datetime.now(), metadata, queue_out))
-        #                     )
-
-    def success(self, response, start, mdata, queue_out):
+    def success(self, res, start, mdata, queue_out, parameters):
         # print 'CassandraConnection success: ', None, start, datetime.now(), mdata
-        queue_out.put((response, start, datetime.now(), mdata))
+        queue_out.put((None, start, datetime.now(), mdata))
 
     def failure(self, response, start, mdata, queue_out):
         # print 'CassandraConnection failure: ', response, start, datetime.now(), mdata
-        # response = 'ERROR! Message: %s Errors: %s' % (response.message, response.errors)
+        response = 'ERROR! %s' % (response)
         # TODO: test this case
         queue_out.put((response, start, datetime.now(), mdata))
 

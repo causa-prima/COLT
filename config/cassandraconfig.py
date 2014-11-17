@@ -92,8 +92,6 @@ class CassandraConfig(ConfigInterface):
 
                 query['attributes'] = attributes
 
-
-
     def delete_old_schema(self):
         drop_msg =  'dropping keyspace %s'
         statement = 'DROP KEYSPACE IF EXISTS %s'

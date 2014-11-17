@@ -9,9 +9,10 @@ schemata:
 workloads:
   fts:
     queries:
-      - query: SELECT * FROM first_test.test1 WHERE name = ?
+      - query: INSERT INTO first_test.test1 (name) VALUES (?)
+        chance: 0
       # Testkommentar
-      #- query: query_2
+      - query: SELECT name FROM first_test.test1 WHERE name = ?
     ratio: 20
 
 config:

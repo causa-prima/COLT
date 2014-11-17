@@ -245,7 +245,7 @@ def watch_and_report(config, logs, events):
         last_second = int(time())-1
         timepoint = datetime.fromtimestamp(last_second)
         try:
-            # TODO: output a chosen percentile instead of the mean
+            # TODO: output a chosen set of percentiles instead of the mean
             # print only values of the last second, as the older ones
             # don't change anymore
             latencies = logs[last_second]

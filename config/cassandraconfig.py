@@ -49,8 +49,6 @@ class CassandraConfig(ConfigInterface):
         # add the needed metadata to the workloads-section
         for workload in self.config['workloads'].values():
             for query in workload['queries']:
-                # TODO: remove following line?
-                # query = {}
                 # Prepare the query, which also gets most needed metadata.
                 # Notice that internal data of the prepared query is used,
                 # which could change in future versions of the driver.

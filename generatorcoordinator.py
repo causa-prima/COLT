@@ -158,7 +158,7 @@ class GeneratorCoordinator(object):
                                 queue_notify_size=self.queue_notify_size,
                                 config=self.config,
                                 # time an item is allowed to be queued
-                                # TODO: set it to value of connection/query timeout
+                                # TODO: set this to value of connection/query timeout
                                 queue_max_time=10,
                                 max_inserted=self.max_inserted,
                                 latencies=self.latencies,
@@ -305,8 +305,7 @@ def watch_and_report(config, logs, events):
             break
 
         # sleep until the next second
-        # TODO: what if computation took more than one second?
-        sleep(last_second+2.25-time())
+        sleep(max(last_second+2.25-time(),0))
 
 
 # helper functions to provide waiting for multiple events simultaneously,

@@ -8,9 +8,12 @@ class ConfigInterface(object):
     config = None
 
     def __init__(self, config_loc=None, connection=None):
-        # this throws an exception if config file was not found
-        # TODO: should we care about this?
-        self.config = load(open(config_loc, "r"))
+        # throw an exception if config file was not found
+        try:
+            self.config = load(open(config_loc, "r"))
+        except IOError as e:
+            print 'problem loading the configuration file: %s' % e
+            exit(1)
         self.connection = connection
         self.process_config()
 

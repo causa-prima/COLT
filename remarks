@@ -4,5 +4,6 @@ needed python packages (installed via pip):
 - six (dependency of cassandra-driver)
 - PyYAML
 - bytearray
+- pyjudy (needs installed judy C-library (?))
 
 - blist (maybe no really needed, but was installed)

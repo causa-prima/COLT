@@ -4,23 +4,32 @@ from time import time, sleep
 from datetime import datetime
 
 from bitarray import bitarray
+from pyjudy import JudyLIntInt
 
 from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogGenerator
 
 class GeneratorCoordinator(object):
 
-    # Create a proxy for the bitarray type so all it's methods can be used.
-    # First, define all mehtods that should not be exposed, than substract
-    # them from all bitarray-methods. Finally, make a proxy type with
-    # all wanted methods.
+    # Create a proxys for non-standard types so all their methods can be used.
+    # First, define all methods that should not be exposed, than substract
+    # them from all methods offered by that type. Finally, make a proxy type
+    # with all wanted methods.
     non_exposed = set(("__class__", "__copy__", "__deepcopy__", "__delattr__",
                        "__dict__", "__doc__", "__format__", "__getattribute__",
                        "__init__", "__module__", "__new__", "__repr__",
                        "__setattr__", "__str__", "__subclasshook__"))
-    methods = tuple(set(dir(bitarray)) - non_exposed)
-    bitarrayProxy = MakeProxyType('bitarrayProxy', methods)
-    # register the bitarray type to use it as a managed object
+
+    bitarray_methods = tuple(set(dir(bitarray)) - non_exposed)
+    bitarrayProxy = MakeProxyType('bitarrayProxy', bitarray_methods)
+
+    JudyLIntInt_methods = tuple(set(dir(JudyLIntInt)) - non_exposed)
+    JudyLIntIntProxy = MakeProxyType('JudyLIntIntProxy', JudyLIntInt_methods)
+
+
+    # register the types to use them as a managed object
     SyncManager.register('bitarray', bitarray, bitarrayProxy)
+    SyncManager.register('JudyLIntInt', JudyLIntInt, JudyLIntIntProxy)
+
     manager = SyncManager()
     manager.start()
 
@@ -46,6 +55,7 @@ class GeneratorCoordinator(object):
         :return:
         """
 
+        # TODO: correct docstring
         # The number of generated data items within each table.
         # If there was already data generated with by same rules one
         # can state this in the config file for each table.
@@ -58,9 +68,15 @@ class GeneratorCoordinator(object):
         # See LogGenerator's process_item for further information.
         self.max_inserted = {}
         for table in config['tables'].keys():
+            self.key_structs[table] = {}
+
             bitmap = self.manager.bitarray()
             bitmap.lock = Lock()
-            self.key_structs[table] = bitmap
+            self.key_structs[table]['bitmap'] = bitmap
+
+            update_dict = self.manager.JudyLIntInt()
+            update_dict.lock = Lock()
+            self.key_structs[table]['update_dict'] = update_dict
             self.max_inserted[table] = Value('L', 0)
             # TODO: import old data: import key bitmap or regenerate?
 
@@ -98,6 +114,7 @@ class GeneratorCoordinator(object):
         self.random_class = random_class
         self.connection_class = connection_class
         self.connection_args = connection_args
+        # TODO: share one connection with all processes if possible (see http://www.datastax.com/dev/blog/4-simple-rules-when-using-the-datastax-drivers-for-cassandra for details why)
         self.connection = connection_class(**connection_args)
 
         self.config = config

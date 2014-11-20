@@ -119,15 +119,17 @@ class WorkloadGenerator(BaseGenerator):
             if len(query['attributes']) == 0:
                 queries.append((False, query_data))
                 continue
-            # we need the bitmap of seeds that were used as primary keys
+            # we need the bitmap of seeds that were used as primary keys and
+            # (maybe) also the dictionary of updated keys
             table = query['table']
-            key_struct = self.key_structs[table]
+            bitmap = self.key_structs[table]['bitmap']
+            update_dict = self.key_structs[table]['update_dict']
             # check if a new data item might be generated
             if query['type'] == 'insert':
                 # lock the bitmap for the table the item will be stored in
-                with key_struct.lock:
-                    partition_seed = key_struct.length()
-                    cluster_seed = partition_seed
+                with bitmap.lock:
+                    cluster_seed = bitmap.length()/3
+                    partition_seed = cluster_seed
                     # seed the generator to produce regeneratable results
                     self.generator.seed(partition_seed)
                     # determine if this seed just generates
@@ -140,44 +142,48 @@ class WorkloadGenerator(BaseGenerator):
                         # a completely new item, we fall back to seed zero,
                         # which always generates a completely new item.
                         while True:
-                            cluster_seed = self.generator.randrange(0, partition_seed)
-                            if cluster_seed == 0 or key_struct[cluster_seed]:
+                            partition_seed = self.generator.randrange(0, cluster_seed)
+                            if partition_seed == 0 or bitmap[partition_seed*3]:
                                 break
 
                     # Tell the other processes what happened by appending the
                     # choice we made to the bitmap. The or-part makes sure that
                     # bitmap[0] is always 1, i.e. seed zero always generates a
                     # completely new item
-                    key_struct.append(not(new_cluster) or cluster_seed == partition_seed)
+                    bitmap.extend((not(new_cluster) or cluster_seed == partition_seed, 0, 0))
+                update_seed = cluster_seed
 
             # query types other than insert need the partition and cluster key
-            # to access specific data. Note that:
-            #  - update takes an old item and inserts the same data that it
-            #    already had, because we would need another data structure
-            #    to mark an item as "updated" and record the changes
-            #  - deleted items are not recorded in any data structure, so they
-            #    might be part of other queries and produce errors or empty
-            #    result sets
+            # to access specific data.
             elif query['type'] in ('select', 'update', 'delete'):
                 # Both a partition key and a cluster key are needed. Choose a
                 # random old seed and look what happened with that seed. If it
                 # generated a new cluster for another partition key, get that
                 # key by following the steps that originally led to that key.
-                with key_struct.lock:
+                with bitmap.lock:
                     # determine the highest used seed
                     # Notice that the data item produced by this seed might not
                     # be in the database if an error occurred while processing.
                     # See comment on max_inserted LogGenerator for more details.
-                    ks_length = key_struct.length()
+                    ks_length = bitmap.length()/3
                     if ks_length > 1:
-                        partition_seed = self.generator.randrange(0, ks_length)
+                        was_deleted = True
+                        # search for a seed that has not been deleted
+                        while was_deleted:
+                            cluster_seed = self.generator.randrange(0, ks_length)
+                            is_primary, was_updated, was_deleted =\
+                                tuple(bitmap[cluster_seed*3:cluster_seed*3+3])
+
                     else:
-                        partition_seed = 0
-                    cluster_seed = partition_seed
+                        cluster_seed = 0
+                        is_primary = True
+                        was_updated = False
+
+                    partition_seed = cluster_seed
                     # if this seed did not produce a completely new item the
                     # partition key it did produce a new cluster for is needed
-                    if not (partition_seed >= ks_length) and\
-                            not key_struct[partition_seed]:
+                    if not (cluster_seed >= ks_length) and\
+                            not is_primary:
                         self.generator.seed(partition_seed)
                         # When generating a new cluster it is first tested if
                         # a new cluster will be generated by using a random
@@ -186,24 +192,61 @@ class WorkloadGenerator(BaseGenerator):
                         # now we can search for the partition key that was used
                         # notice this takes 1/chance steps on average
                         while True:
-                            cluster_seed = self.generator.randrange(0, partition_seed+1)
-                            if key_struct[cluster_seed] or cluster_seed == 0:
+                            partition_seed = self.generator.randrange(0, cluster_seed)
+                            is_primary, was_updated, was_deleted =\
+                                tuple(bitmap[cluster_seed*3:cluster_seed*3+3])
+                            if (not was_deleted) and\
+                                    (partition_seed == 0 or is_primary):
                                 break
+                update_seed = cluster_seed
+                # if the item has been updated get the seed used for that
+                if was_updated:
+                    with update_dict.lock:
+                        update_seed = update_dict[cluster_seed]
+
+                # if an item will get an update, determine the seed for that,
+                # put it in the update_dict and set the was_updated-bit in the
+                # key bitmap if necessary
+                # TODO: don't use self.generator, but some LCG with high period or (re-)hash
+                if query['type'] == 'update':
+                    if not was_updated:
+                        # hash the cluster key to compute the first seed to use
+                        with update_dict.lock:
+                            self.generator.seed(cluster_seed)
+                            update_seed = self.generator.randrange(0, 2**63)
+                            update_dict[cluster_seed] = update_seed
+                        with bitmap.lock:
+                            # set the was_updated bit
+                            bitmap[cluster_seed*3+1] = True
+                    else:
+                        # hash the used seed to compute the next seed to use
+                        with update_dict.lock:
+                            self.generator.seed(update_dict[cluster_seed])
+                            update_seed = self.generator.randrange(0, 2**63)
+                            update_dict[cluster_seed] = update_seed
+
+                # set the was_deleted bit if an item should be deleted and
+                # delete the entry in the update_dict if it has one
+                if query['type'] == 'delete':
+                    with bitmap.lock:
+                        bitmap[cluster_seed*3+2] = True
+                    if was_updated:
+                        with update_dict.lock:
+                            del update_dict[cluster_seed]
+
             else:
                 msg = 'unsupported query type %s' % query[type]
                 raise NotImplementedError(msg)
 
-            # In case the query uses a cluster of a partition key the seeds have
-            # to be switched, otherwise they are identical.
-            if partition_seed != cluster_seed:
-                partition_seed, cluster_seed = cluster_seed, partition_seed
             # Finally iterate over all the attributes of this query and append
             # the needed metadata to the list of queries.
             for attribute in query['attributes']:
                 if attribute['level'] == 'partition':
                     seed = partition_seed
-                else:
+                elif attribute['level'] == 'cluster':
                     seed = cluster_seed
+                else:
+                    seed = update_seed
                 data = (attribute['type'], seed, attribute['generator args'])
                 # append the attribute data to the list of attributes for that
                 # query
@@ -388,5 +431,6 @@ class LogGenerator(BaseGenerator):
                 msg = 'New item should have been inserted, but an error occured.'
                 raise Warning(msg)
             table = self.config['workloads'][workload_name]['queries'][query_num]['table']
+            # TODO: now that we can delete entries, max_inserted is senseless, right?
             with self.max_inserted[table].get_lock():
                 self.max_inserted[table].value += 1

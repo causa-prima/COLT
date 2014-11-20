@@ -74,10 +74,11 @@ class CassandraConfig(ConfigInterface):
                     # check what 'level' the attribute has
                     attribute_info['level'] = 'attribute'
                     if col_name in self.schemata[ks][table]['partition key']:
-                        attribute_info['level'] = 'primary'
-                    elif col_name in self.schemata[ks][table]['clustering key']:
                         attribute_info['level'] = 'partition'
-
+                    elif col_name in self.schemata[ks][table]['clustering key']:
+                        attribute_info['level'] = 'cluster'
+                    else:
+                        attribute_info['level'] = 'attribute'
                     # finally, copy the generator args
                     try:
                         attribute_info['generator args'] = self.config['schemata'][ks][table]['distributions'][col_name]
@@ -136,7 +137,7 @@ workloads:
 		  type: 'insert' | 'select' | 'update' | 'delete'		# how to get those? parsing? hopefully not..
 		  chance: <float[0,1]>						# only if type == 'insert'
 		  attributes: [
-			       level: 'primary' | 'partition' | 'attribute'	# other names could be used - should they?
+			       level: 'partition' | 'cluster' | 'attribute'	# other names could be used - should they?
 			       type: <data_type>
 			       generator args: <dict of args for generator>	# can it be empty?
 			      ]

@@ -1,7 +1,7 @@
-from config.configinterface import ConfigInterface
+from preparation.preparationinterface import PreparationInterface
 
 
-class CassandraConfig(ConfigInterface):
+class CassandraPreparation(PreparationInterface):
 
     def __init__(self, config_loc=None, connection=None):
 
@@ -12,7 +12,7 @@ class CassandraConfig(ConfigInterface):
         # name
         self.join_string = '@'
 
-        ConfigInterface.__init__(self, config_loc=config_loc,
+        PreparationInterface.__init__(self, config_loc=config_loc,
                                  connection=connection)
 
     def get_schemata(self):
@@ -105,7 +105,7 @@ class CassandraConfig(ConfigInterface):
         """ Create the keyspace and tables defined in ks_def, which is a part
         of self.config, hence following the same format.
 
-        :param dict ks_data: self.conf['schemata'][keyspace_name] where the keyspace to create is defined
+        :param dict ks_data: self.config['schemata'][keyspace_name] where the keyspace to create is defined
         """
         print 'creating keyspace %s with definition "%s"' % (ks_name,ks_data['definition'])
         self.connection.execute_unprepared_stmt(ks_data['definition'])
@@ -120,7 +120,7 @@ class CassandraConfig(ConfigInterface):
         """ Creates the table defined in table_data, which is a part of
         self.config, hence following the same format
 
-        :param dict table_data: self.conf['schemata'][keyspace_name]['tables'][tablename] where the table to create is defined
+        :param dict table_data: self.config['schemata'][keyspace_name]['tables'][tablename] where the table to create is defined
         """
         self.connection.execute_unprepared_stmt(table_data['definition'])
 

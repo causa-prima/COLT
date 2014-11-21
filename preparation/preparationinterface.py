@@ -1,6 +1,6 @@
 from yaml import load, dump
 
-class ConfigInterface(object):
+class PreparationInterface(object):
     """ Interface to load and process Config objects. Loads and parses
      YAML file from location given on construction on initialization.
 

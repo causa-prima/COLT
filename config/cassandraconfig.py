@@ -1,5 +1,4 @@
 from config.configinterface import ConfigInterface
-from connection.cassandraconnection import CassandraConnection
 
 
 class CassandraConfig(ConfigInterface):
@@ -65,6 +64,7 @@ class CassandraConfig(ConfigInterface):
                 for ks, table, col_name, col_type in prep_stmt.column_metadata:
                     attribute_info = {}
 
+                    attribute_info['column name hash'] = hash(col_name)
                     # get the type name, append the subtypes for composite types
                     typename = col_type.typename
                     if len(col_type.subtypes) > 0:
@@ -72,7 +72,6 @@ class CassandraConfig(ConfigInterface):
                     attribute_info['type'] = typename
 
                     # check what 'level' the attribute has
-                    attribute_info['level'] = 'attribute'
                     if col_name in self.schemata[ks][table]['partition key']:
                         attribute_info['level'] = 'partition'
                     elif col_name in self.schemata[ks][table]['clustering key']:
@@ -81,7 +80,7 @@ class CassandraConfig(ConfigInterface):
                         attribute_info['level'] = 'attribute'
                     # finally, copy the generator args
                     try:
-                        attribute_info['generator args'] = self.config['schemata'][ks][table]['distributions'][col_name]
+                        attribute_info['generator args'] = self.config['schemata'][ks]['tables'][table]['distributions'][col_name]
                     except KeyError:
                         attribute_info['generator args'] = {}
                     attributes.append(attribute_info)
@@ -137,6 +136,7 @@ workloads:
 		  type: 'insert' | 'select' | 'update' | 'delete'		# how to get those? parsing? hopefully not..
 		  chance: <float[0,1]>						# only if type == 'insert'
 		  attributes: [
+		           column name hash: hash(<column_name>)
 			       level: 'partition' | 'cluster' | 'attribute'	# other names could be used - should they?
 			       type: <data_type>
 			       generator args: <dict of args for generator>	# can it be empty?

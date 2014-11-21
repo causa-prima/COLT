@@ -1,0 +1,51 @@
+schemata:
+  events:                     # multiline strings in YAML that should
+    definition: |             # keep line breaks are denoted with a |
+                  CREATE KEYSPACE IF NOT EXISTS events
+                  WITH REPLICATION = {'class':'SimpleStrategy',
+                                      'replication_factor':3}
+    tables:
+      timeline:
+        definition: |
+                      CREATE TABLE events.timeline (
+                        day TEXT,
+                        hour INT,
+                        min INT,
+                        sec INT,
+                        value TEXT,
+                        PRIMARY KEY (day, hour, min, sec))
+        distributions:        # time values have certain restrictions
+          day: {size: 11}
+          hour: {low: 0, high: 23}
+          min: &id001 {low: 0, high: 59} # using an anchor
+          sec: *id001                   # setting reference to anchor
+
+workloads:
+  insert_values:
+    queries:
+      - query: |
+                INSERT INTO events.timeline (day, hour, min, sec, value)
+                              VALUES (?, ?, ?, ?, ?)
+        chance: .001          # many inserts per day, as the chance to
+    ratio: 1300               # create a new partition is very low 
+  query_timeframes:
+    queries: 
+      - query: | 
+                  SELECT * FROM events.timeline WHERE day= ?
+                            AND (hour, min) >= (9, 00)
+                            AND (hour, min, sec) <= (11, 59, 59)
+      - query: | 
+                  SELECT * FROM events.timeline WHERE day= ?
+                            AND (hour, min) >= (15, 00)
+                            AND (hour, min, sec) <= (17, 59, 59)
+    ratio: 10
+    
+config:
+  termination conditions:
+    latency:
+      max: 1000               # value in ms
+      consecutive: 5
+    queries:
+      max: 10000
+      consecutive: 5
+

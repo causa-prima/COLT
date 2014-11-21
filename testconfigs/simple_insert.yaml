@@ -1,0 +1,25 @@
+schemata:
+  # Testkommentar
+  first_test:
+    definition: CREATE KEYSPACE first_test WITH REPLICATION = {'class':'SimpleStrategy', 'replication_factor':3}
+    tables:
+      test1:
+        definition: CREATE TABLE IF NOT EXISTS first_test.test1 (name TEXT, PRIMARY KEY(name))
+
+workloads:
+  fts:
+    queries:
+      - query: INSERT INTO first_test.test1 (name) VALUES (?);
+        chance: 0
+      # Testkommentar
+      #- query: query_2
+    ratio: 20
+
+config:
+  termination conditions:
+    latency:
+      max: 100 # Value in ms
+      consecutive: 5
+    queries:
+      # max: 10 # bonus parameter
+      consecutive: 5

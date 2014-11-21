@@ -34,7 +34,7 @@ class GeneratorCoordinator(object):
     manager.start()
 
     def __init__(self, config, random_class, connection_class, connection_args={},
-                 queue_target_size=10, max_processes=4):
+                 queue_target_size=100, max_processes=4):
         # TODO: complete docstring
         """ The GeneratorCoordinator spawns multiple processes for data
         and query generation. Generators communicate via queues,
@@ -64,9 +64,6 @@ class GeneratorCoordinator(object):
         # Because of the separation of data generation and querying
         # two dicts are needed to handle both processes separately.
         self.key_structs = {}
-        # The number of generated data items per table written to the database
-        # See LogGenerator's process_item for further information.
-        self.max_inserted = {}
         for table in config['tables'].keys():
             self.key_structs[table] = {}
 
@@ -77,7 +74,6 @@ class GeneratorCoordinator(object):
             update_dict = self.manager.JudyLIntInt()
             update_dict.lock = Lock()
             self.key_structs[table]['update_dict'] = update_dict
-            self.max_inserted[table] = Value('L', 0)
             # TODO: import old data: import key bitmap or regenerate?
 
         # target sizes of queues
@@ -177,7 +173,6 @@ class GeneratorCoordinator(object):
                                 # time an item is allowed to be queued
                                 # TODO: set this to value of connection/query timeout
                                 queue_max_time=10,
-                                max_inserted=self.max_inserted,
                                 latencies=self.latencies,
                                 needs_more_processes=self.events['LogGenerators2'])
 
@@ -238,8 +233,6 @@ class GeneratorCoordinator(object):
             # now wait for a second, but wake up if receiving the
             # shutdown signal
             events['shutdown'].wait(1)
-        # Print the number of generated data items
-        print 'max_inserted:', self.max_inserted
         # TODO: what needs to be done before shutting down?
 
 

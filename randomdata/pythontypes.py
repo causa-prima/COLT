@@ -53,6 +53,28 @@ class PythonTypes(Random):
                 raise NotImplementedError(
                     'Generation of type {} not implemented in {}'.format(type_to_gen, self.__class__.__name__))
 
+    def lcg_random(self, seed, signed=True):
+        """Simple linear congruential generator, with parameters from MMIX by
+        Donald Knuth, hence using a=6364136223846793005, c=1442695040888963407.
+        The period of this LCG is 2**64, hence the parameter signed determines
+        if the output should be a signed or an unsigned int. Note that for
+        return values > 2**63-1 (only occurring when signed is False) the
+        return type will be long as python does not support unsigned integers.
+
+        :param int seed: the seed to use for generation.
+        :param bool signed: determines if output should be signed or unsigned
+        :return: signed or unsigned integer
+        :rtype: int or long
+        """
+        if signed:
+            seed += 2**63
+            val = (6364136223846793005 * seed + 1442695040888963407) % 2**64-1
+            return int(val-2**63)
+        else:
+            val = (6364136223846793005 * seed + 1442695040888963407) % 2**64-1
+            return int(val)
+
+
     def pydate(self, start_date=None, end_date=None, start_timestamp=1388530800, end_timestamp=1420066799):
         """Generates a random timestamp between two dates given either as
         datetime or timestamp. If start_date __and__ end_date are defined,

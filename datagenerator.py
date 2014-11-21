@@ -134,7 +134,7 @@ class WorkloadGenerator(BaseGenerator):
                     self.generator.seed(partition_seed)
                     # determine if this seed just generates
                     # a new cluster for an old primary key
-                    new_cluster = query['chance'] >= self.generator.random()
+                    new_cluster = query['chance'] <= self.generator.random()
                     if new_cluster and partition_seed > 0:
                         # We need an old key that created a completely new
                         # item, so we randomly iterate over old keys until we
@@ -145,7 +145,6 @@ class WorkloadGenerator(BaseGenerator):
                             partition_seed = self.generator.randrange(0, cluster_seed)
                             if partition_seed == 0 or bitmap[partition_seed*3]:
                                 break
-
                     # Tell the other processes what happened by appending the
                     # choice we made to the bitmap. The or-part makes sure that
                     # bitmap[0] is always 1, i.e. seed zero always generates a
@@ -207,22 +206,19 @@ class WorkloadGenerator(BaseGenerator):
                 # if an item will get an update, determine the seed for that,
                 # put it in the update_dict and set the was_updated-bit in the
                 # key bitmap if necessary
-                # TODO: don't use self.generator, but some LCG with high period or (re-)hash
                 if query['type'] == 'update':
                     if not was_updated:
-                        # hash the cluster key to compute the first seed to use
+                        # use the cluster key to compute the first seed to use
                         with update_dict.lock:
-                            self.generator.seed(cluster_seed)
-                            update_seed = self.generator.randrange(0, 2**63)
+                            update_seed = self.generator.lcg_random(cluster_seed)
                             update_dict[cluster_seed] = update_seed
                         with bitmap.lock:
                             # set the was_updated bit
                             bitmap[cluster_seed*3+1] = True
                     else:
-                        # hash the used seed to compute the next seed to use
+                        # use the old update seed to compute the next seed
                         with update_dict.lock:
-                            self.generator.seed(update_dict[cluster_seed])
-                            update_seed = self.generator.randrange(0, 2**63)
+                            update_seed = self.generator.lcg_random(update_dict[cluster_seed])
                             update_dict[cluster_seed] = update_seed
 
                 # set the was_deleted bit if an item should be deleted and
@@ -247,6 +243,8 @@ class WorkloadGenerator(BaseGenerator):
                     seed = cluster_seed
                 else:
                     seed = update_seed
+                # make the seed unique per attribute
+                seed += attribute['column name hash']
                 data = (attribute['type'], seed, attribute['generator args'])
                 # append the attribute data to the list of attributes for that
                 # query
@@ -399,7 +397,7 @@ class LogGenerator(BaseGenerator):
         if (now > self.now) and num_queries > 0:
             # put the results into the GeneratorCoordinator's
             # synchronized objects and reset the variables
-            # TODO: synchronization does NOT work!
+            # TODO: check if synchronisation does work
             with self.latencies.lock:
                 try:
                     # print '%5i queries reported by %s' % (num_queries, self.name)
@@ -417,20 +415,7 @@ class LogGenerator(BaseGenerator):
                 self.processed_latencies.append((end - start, workload_name, query_num))
 
 
-        # Increment the max_inserted counter if a new item was generated.
-        # Note that this number does not necessarily represent the seed that
-        # was used to generate the new item, as queries should happen
-        # asynchronously. To guarantee that max_inserted equals the maximum
-        # seed related to an item in the database, another way of storing this
-        # information would be needed. This would introduce more complexity and
-        # overhead. The chosen approach should work well enough as long as no
-        # errors occur when inserting new data, hence this case should be
-        # considered.
-        if new:
-            if result is not None:
-                msg = 'New item should have been inserted, but an error occured.'
-                raise Warning(msg)
-            table = self.config['workloads'][workload_name]['queries'][query_num]['table']
-            # TODO: now that we can delete entries, max_inserted is senseless, right?
-            with self.max_inserted[table].get_lock():
-                self.max_inserted[table].value += 1
+        # Report if errors occur when inserting new data.
+        if new and (result is not None):
+            msg = 'New item should have been inserted, but an error occured.'
+            raise Warning(msg)

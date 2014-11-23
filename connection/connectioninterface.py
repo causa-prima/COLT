@@ -9,13 +9,14 @@ class ConnectionInterface(object):
     have to be implemented by subclasses.
     """
 
-    def __init__(self, **kwargs):
-        self.connect(**kwargs)
+    def __init__(self, **connection_args):
+        self.connection_args = connection_args
+        self.connect()
 
     def __del__(self):
         self.shutdown()
 
-    def connect(self, **kwargs):
+    def connect(self):
         raise NotImplementedError
 
     def shutdown(self):
@@ -23,7 +24,7 @@ class ConnectionInterface(object):
 
     def reset(self):
         self.shutdown()
-        self.connect()
+        self.connect(**self.connection_args)
 
     def execute(self, query, parameters, out_queue, metadata=None):
         """ Binds parameters to a given query and executes it non-blocking and

@@ -9,10 +9,6 @@ class PreparationInterface(object):
      YAML file from location given on construction on initialization.
 
     """
-    connection_class = ConnectionInterface
-    connection = None
-    randomdata_class = PythonTypes
-
     def __init__(self, config=None):
         self.config = config
 
@@ -20,6 +16,17 @@ class PreparationInterface(object):
             self.connection_args = config['config']['database']['connection arguments']
         except KeyError:
             self.connection_args = {}
+
+        if not hasattr(self, 'connection_class'):
+            raise NotImplementedError('connection_class undefined!')
+        if not hasattr(self, 'randomdata_class'):
+            raise NotImplementedError('randomdata_class undefined!')
+
+        self.connection = self.connection_class(**self.connection_args)
+
+        # TODO: add option to choose if database should be reinitialized, discarding all present data
+        self.delete_old_schema()
+        self.initialize_schema()
 
         self.process_config()
 

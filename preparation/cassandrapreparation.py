@@ -7,6 +7,9 @@ class CassandraPreparation(PreparationInterface):
 
     def __init__(self, config=None):
 
+        self.connection_class = CassandraConnection
+        self.randomdata_class = CassandraTypes
+
         self.schemata = {}
         # string used to join arguments if needed,
         # e.g. keyspace and table name
@@ -38,16 +41,6 @@ class CassandraPreparation(PreparationInterface):
                     self.schemata[ks_name][table_name]['clustering key'].append(cl_key.name)
 
     def process_config(self):
-        # first re-define the main attributes
-        self.connection_class = CassandraConnection
-        self.connection = CassandraConnection(**self.connection_args)
-
-        self.randomdata_class = CassandraTypes
-
-        self.config['tables'] = {}
-        # TODO: add option to choose if database should be reinitialized, discarding all present data
-        self.delete_old_schema()
-        self.initialize_schema()
         self.get_schemata()
 
         # add the needed metadata to the workloads-section
@@ -103,6 +96,7 @@ class CassandraPreparation(PreparationInterface):
             self.connection.execute_unprepared_stmt(statement % ks_name)
 
     def initialize_schema(self):
+        self.config['tables'] = {}
         for ks_name, ks_data in self.config['schemata'].items():
             self.create_keyspace(ks_name, ks_data)
 

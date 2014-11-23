@@ -12,15 +12,13 @@ class CassandraConnection(ConnectionInterface):
     execute_unprepared_stmt = None
     prepare = None
 
-    def __init__(self, **kwargs):
-        ConnectionInterface.__init__(self, **kwargs)
+    def __init__(self, **connection_args):
+        ConnectionInterface.__init__(self, **connection_args)
 
-    def connect(self, **kwargs):
+    def connect(self):
         """ Create connection to cassandra cluster.
-
-        :param kwargs: keyword arguments for cassandra.cluster.Cluster
         """
-        self.cluster = Cluster(**kwargs)
+        self.cluster = Cluster(**self.connection_args)
         self.session = self.cluster.connect()
 
         # method to execute unprepared statements

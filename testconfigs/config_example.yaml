@@ -18,7 +18,7 @@ schemata:
           day: {size: 11}
           hour: {low: 0, high: 23}
           min: &id001 {low: 0, high: 59} # using an anchor
-          sec: *id001                   # setting reference to anchor
+          sec: *id001                    # referencing the anchor
 
 workloads:
   insert_values:
@@ -41,6 +41,9 @@ workloads:
     ratio: 10
     
 config:
+  database:
+      type: Cassandra
+      connection arguments: {protocol_version: 3}
   termination conditions:
     latency:
       max: 1000               # value in ms
@@ -48,4 +51,3 @@ config:
     queries:
       max: 10000
       consecutive: 5
-

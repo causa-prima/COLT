@@ -1,19 +1,18 @@
 from preparation.preparationinterface import PreparationInterface
+from randomdata.cassandratypes import CassandraTypes
+from connection.cassandraconnection import CassandraConnection
 
 
 class CassandraPreparation(PreparationInterface):
 
-    def __init__(self, config_loc=None, connection=None):
+    def __init__(self, config=None):
 
-        self.connection = connection
         self.schemata = {}
-
-        # string used to join arguments if needed, e.g. keyspace and table
-        # name
+        # string used to join arguments if needed,
+        # e.g. keyspace and table name
         self.join_string = '@'
 
-        PreparationInterface.__init__(self, config_loc=config_loc,
-                                 connection=connection)
+        PreparationInterface.__init__(self, config=config)
 
     def get_schemata(self):
         """ Receives schemata from cassandra and adds it to self.schema in a
@@ -39,6 +38,12 @@ class CassandraPreparation(PreparationInterface):
                     self.schemata[ks_name][table_name]['clustering key'].append(cl_key.name)
 
     def process_config(self):
+        # first re-define the main attributes
+        self.connection_class = CassandraConnection
+        self.connection = CassandraConnection(**self.connection_args)
+
+        self.randomdata_class = CassandraTypes
+
         self.config['tables'] = {}
         # TODO: add option to choose if database should be reinitialized, discarding all present data
         self.delete_old_schema()

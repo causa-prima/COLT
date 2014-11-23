@@ -1,21 +1,33 @@
-from yaml import load, dump
+from yaml import dump
+
+from generatorcoordinator import GeneratorCoordinator
+from connection.connectioninterface import ConnectionInterface
+from randomdata.pythontypes import PythonTypes
 
 class PreparationInterface(object):
     """ Interface to load and process Config objects. Loads and parses
      YAML file from location given on construction on initialization.
 
     """
-    config = None
+    connection_class = ConnectionInterface
+    connection = None
+    randomdata_class = PythonTypes
 
-    def __init__(self, config_loc=None, connection=None):
-        # throw an exception if config file was not found
+    def __init__(self, config=None):
+        self.config = config
+
         try:
-            self.config = load(open(config_loc, "r"))
-        except IOError as e:
-            print 'problem loading the configuration file: %s' % e
-            exit(1)
-        self.connection = connection
+            self.connection_args = config['config']['database']['connection arguments']
+        except KeyError:
+            self.connection_args = {}
+
         self.process_config()
+
+        gc = GeneratorCoordinator(self.config,
+                                  self.randomdata_class,
+                                  self.connection_class,
+                                  self.connection_args)
+        gc.start()
 
     def delete_old_schema(self):
         ''' Try to delete everything defined in the schemata part of the config

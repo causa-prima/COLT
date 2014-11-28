@@ -1,0 +1,66 @@
+schemata:
+  testkeyspace:                     # multiline strings in YAML that should
+    definition: |             # keep line breaks are denoted with a |
+                  CREATE KEYSPACE IF NOT EXISTS testkeyspace
+                  WITH REPLICATION = {'class':'SimpleStrategy',
+                                      'replication_factor':1}
+    tables:
+      typestest:
+        definition: |
+                      CREATE TABLE testkeyspace.typestest (
+                            name text,
+                            choice boolean,
+                            date timestamp,
+                            address inet,
+                            dbl double,
+                            lval bigint,
+                            ival int,
+                            uid timeuuid,
+                            value blob,
+                            PRIMARY KEY((name,choice), date, address, dbl, lval, ival, uid)
+                      )
+
+workloads:
+  create:
+    queries:
+      - query: | 
+                  INSERT INTO testkeyspace.typestest
+                  (name,choice,date,address,dbl,lval,ival,uid,value) VALUES
+                  (?,?,?,?,?,?,?,?,?)
+        chance: 0.015625
+    ratio: 1
+  read:
+    queries: 
+      - query: | 
+                  SELECT * FROM testkeyspace.typestest where name = ?
+                  AND choice = ? LIMIT 100
+    ratio: 0
+  update:
+    queries:
+      - query: | 
+                  UPDATE testkeyspace.typestest SET value=?
+                  WHERE name=? AND choice=?
+                  AND date=? AND address=?
+                  AND dbl=? AND lval=?
+                  AND ival=? and uid=?
+    ratio: 0
+  delete:
+    queries:
+      - query: | 
+                  DELETE FROM testkeyspace.typestest
+                  WHERE name = ?
+                  AND choice = ?
+                  AND date = ?
+    ratio: 0
+    
+config:
+  database:
+      type: Cassandra
+      connection arguments: {protocol_version: 3}
+  termination conditions:
+    latency:
+      max: 1000               # value in ms
+      consecutive: 5
+    queries:
+      max: 10000
+      consecutive: 5

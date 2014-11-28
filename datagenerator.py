@@ -105,7 +105,7 @@ class WorkloadGenerator(BaseGenerator):
     def process_item(self):
         # choose a workload to work on by picking
         # a random int between 0 and ratio_sum
-        choice = self.generator.randint(0, self.ratio_sum)
+        choice = self.generator.random() * self.ratio_sum
         choice = max(key for key in self.ratio_nums if key <= choice)
 
         # get the chosen workload
@@ -174,9 +174,14 @@ class WorkloadGenerator(BaseGenerator):
                                 tuple(bitmap[cluster_seed*3:cluster_seed*3+3])
 
                     else:
-                        cluster_seed = 0
-                        is_primary = True
-                        was_updated = False
+                        # A workload other than insert has been chosen, but
+                        # there has been not data generated yet that could be
+                        # used. Return to the _run method and hope this won't
+                        # happen again.
+                        # TODO: better handling of that case
+                        print 'No data has been created yet,',
+                        print 'but a query in the chosen workload needs data.'
+                        return
 
                     partition_seed = cluster_seed
                     # if this seed did not produce a completely new item the

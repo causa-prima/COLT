@@ -21,7 +21,7 @@ schemata:
           sec: *id001                    # referencing the anchor
 
 workloads:
-  insert_values:
+  insert_data:
     queries:
       - query: |
                 INSERT INTO events.timeline (day, hour, min, sec, value)

@@ -1,5 +1,5 @@
-from multiprocessing import Event, Lock, Process, Value
-from multiprocessing.managers import SyncManager, MakeProxyType, ListProxy
+from multiprocessing import Event, Lock, Process
+from multiprocessing.managers import SyncManager, MakeProxyType
 from time import time, sleep
 from datetime import datetime
 
@@ -9,7 +9,6 @@ from pyjudy import JudyLIntInt
 from datagenerator import DataGenerator, WorkloadGenerator, QueryGenerator, LogGenerator
 
 class GeneratorCoordinator(object):
-
     # Create a proxys for non-standard types so all their methods can be used.
     # First, define all methods that should not be exposed, than substract
     # them from all methods offered by that type. Finally, make a proxy type
@@ -54,7 +53,6 @@ class GeneratorCoordinator(object):
         :param connection_class:
         :return:
         """
-
         # TODO: correct docstring
         # The number of generated data items within each table.
         # If there was already data generated with by same rules one
@@ -116,10 +114,10 @@ class GeneratorCoordinator(object):
         self.config = config
 
     def start(self):
-        wl_generator = self.generate_generator('Workload')
-        data_generator = self.generate_generator('Data')
-        query_generator = self.generate_generator('Query')
-        logger = self.generate_generator('Log')
+        wl_generator = self.create_generator('Workload')
+        data_generator = self.create_generator('Data')
+        query_generator = self.create_generator('Query')
+        logger = self.create_generator('Log')
         watcher = Process(target=watch_and_report,
                           args=(self.config, self.latencies, self.events))
         self.processes = [wl_generator, data_generator,
@@ -134,7 +132,7 @@ class GeneratorCoordinator(object):
 
         self.supervise()
 
-    def generate_generator(self, generator_type):
+    def create_generator(self, generator_type):
         print 'creating new %sGenerator' % generator_type
         if generator_type == 'Workload':
             return WorkloadGenerator(queue_out=self.queues['next_workload'],
@@ -203,20 +201,23 @@ class GeneratorCoordinator(object):
 
             # check which queue needs more input and create the
             # corresponding generator if needed
+            # TODO: Signal raising only considers the preceding generator class.
+            # This generator class might also not have enough input data, so it
+            # might be senseless to create a new process for that class.
             if events['DataGenerators'].is_set() and \
                         queues['next_workload'].qsize() < notify_size:
-                new_processes.append(self.generate_generator('Workload'))
+                new_processes.append(self.create_generator('Workload'))
             if events['QueryGenerators'].is_set() and \
                         queues['workload_data'].qsize() < notify_size:
-                new_processes.append(self.generate_generator('Data'))
+                new_processes.append(self.create_generator('Data'))
             if events['LogGenerators'] and \
                         queues['executed_queries'].qsize() < notify_size:
-                new_processes.append(self.generate_generator('Query'))
+                new_processes.append(self.create_generator('Query'))
 
             # check if more LogGenerators are needed
             if events['LogGenerators2'] or \
                         queues['executed_queries'].qsize() > target_size:
-                new_processes.append(self.generate_generator('Log'))
+                new_processes.append(self.create_generator('Log'))
 
             # start all newly generated processes
             for proc in new_processes:

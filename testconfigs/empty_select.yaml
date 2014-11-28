@@ -22,3 +22,15 @@ config:
     queries:
       # max: 10 # bonus parameter
       consecutive: 5
+
+config:
+  database:
+      type: Cassandra
+      connection arguments: {protocol_version: 3}
+  termination conditions:
+    latency:
+      max: 1000               # value in ms
+      consecutive: 5
+    queries:
+      max: 10000
+      consecutive: 5

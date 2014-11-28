@@ -24,7 +24,7 @@ class ConnectionInterface(object):
 
     def reset(self):
         self.shutdown()
-        self.connect(**self.connection_args)
+        self.connect()
 
     def execute(self, query, parameters, out_queue, metadata=None):
         """ Binds parameters to a given query and executes it non-blocking and

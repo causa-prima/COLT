@@ -251,6 +251,9 @@ def watch_and_report(config, logs, events):
     succ_latencies = 0
     succ_queries = 0
     last_num_queries = 0
+    queries_sum = 0
+    latency_sum_o = 0
+    tests=0
 
     while True:
         last_second = int(time())-1
@@ -259,20 +262,26 @@ def watch_and_report(config, logs, events):
             # TODO: output a chosen set of percentiles instead of the mean
             # print only values of the last second, as the older ones
             # don't change anymore
+            tests += 1
             latencies = logs[last_second]
             queries = len(latencies)
+            queries_sum += queries
             latency_sum = 0
+
             for latency, _, _ in latencies:
                 latency_sum += latency.total_seconds()*1000
-            print 'latency_sum: %s' % latency_sum
+            latency_sum_o += latency_sum
+
             latency = latency_sum/queries
+
         except KeyError:
             print timepoint, 'No data'
             # sleep until the next second, then continue
             sleep(last_second+2.25-time())
             continue
-        msg = '%s     queries/sec: %10i     avg latency: %10.2f ms'
-        print msg % (timepoint, queries, latency)
+        msg = '%s     queries/sec: %10i     avg latency (last secons): %10.2f ms     ' \
+              'queries/sec avg: %10i     latency avg (runtime): %10.2f ms'
+        print msg % (timepoint, queries, latency, queries_sum/tests, latency_sum_o/queries_sum)
 
         # if the latency exceeds the defined threshold, increment the value
         # of successive latencies over the threshold

@@ -1,0 +1,53 @@
+keyspace: testkeyspace
+keyspace_definition: |
+  CREATE KEYSPACE testkeyspace WITH
+  replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+
+table: typestest
+table_definition: |
+  CREATE TABLE typestest (
+        name text,
+        choice boolean,
+        date timestamp,
+        address inet,
+        dbl double,
+        lval bigint,
+        ival int,
+        uid timeuuid,
+        value blob,
+        PRIMARY KEY((name,choice), date, address, dbl, lval, ival, uid)
+  )
+
+columnspec:
+  - name: name
+    size: fixed(10)
+  - name: value
+    size: fixed(50)
+
+queries:
+   create:
+      cql: | 
+                  INSERT INTO testkeyspace.typestest
+                  (name,choice,date,address,dbl,lval,ival,uid,value)
+                  VALUES (?,?,?,?,?,?,?,?,?)
+      fields: samerow
+   read:
+      cql: | 
+                  SELECT * FROM testkeyspace.typestest where name = ?
+                  AND choice = ? LIMIT 100
+      fields: samerow
+   update:
+      cql: | 
+                  UPDATE testkeyspace.typestest SET value=?
+                  WHERE name=? AND choice=?
+                  AND date=? AND address=?
+                  AND dbl=? AND lval=?
+                  AND ival=? and uid=?
+      fields: samerow
+   delete:
+      cql: | 
+                  DELETE FROM testkeyspace.typestest
+                  WHERE name = ?
+                  AND choice = ?
+                  AND date = ?
+      fields: samerow

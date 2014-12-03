@@ -3,7 +3,7 @@ needed python packages (installed via pip):
 - futures (dependency of cassandra-driver)
 - six (dependency of cassandra-driver)
 - PyYAML
-- bytearray
+- bitarray
 - pyjudy (needs installed judy C-library (?))
 
-- blist (maybe no really needed, but was installed)
+- blist (used by cassandra-driver, optional)
